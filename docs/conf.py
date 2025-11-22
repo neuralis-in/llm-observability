@@ -54,10 +54,10 @@ if HAS_FURO:
             }
         ],
     }
-    # Also set generic logo for other builders
-    html_logo = "_static/logo-light.svg"
 else:
     html_theme_options = {}
+    # For non-Furo themes, set a single logo
+    html_logo = "_static/logo-light.svg"
 
 autodoc_default_options = {
     "members": True,
