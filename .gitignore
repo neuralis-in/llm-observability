@@ -26,3 +26,4 @@ coverage.xml
 llm_observability.json
 **/llm_observability.json
 tmp_*.json
+docs/_build/

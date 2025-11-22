@@ -110,3 +110,19 @@ If you don’t explicitly register providers, the collector auto-loads built-ins
   - `providers/openai/apis/models/*`: Pydantic request/response schemas per API.
 
 Providers construct Pydantic request/response models and pass typed `Event` objects to the collector; only the collector serializes to JSON.
+
+## Docs
+
+Sphinx documentation lives under `docs/`.
+
+- Install docs deps (note the quotes for zsh):
+  - `pip install '.[docs]'`
+- Build HTML docs:
+  - `python -m sphinx -b html docs docs/_build/html`
+- Open `docs/_build/html/index.html` in your browser.
+
+GitHub Pages
+- Docs auto-deploy from `main` via GitHub Actions (pages.yml).
+- After merging to `main`, the site is available at:
+  - `https://neuralis.github.io/llm-observability/`
+  - If your org/user or repo name differs, GitHub Pages uses `https://<owner>.github.io/<repo>/`.

@@ -38,6 +38,10 @@ example = [
 test = [
   "pytest>=7",
 ]
+docs = [
+  "sphinx>=7",
+  "furo>=2024.1.29",
+]
 
 [project.urls]
 Homepage = "https://github.com/"

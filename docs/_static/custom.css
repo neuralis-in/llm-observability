@@ -1,0 +1,21 @@
+/* Brand colors for Furo theme */
+:root {
+  --color-brand-primary: #3a86ff; /* blue */
+  --color-brand-content: #3a86ff;
+}
+
+[data-theme="dark"] {
+  --color-brand-primary: #80b3ff; /* lighter blue for dark */
+  --color-brand-content: #80b3ff;
+}
+
+/* Optional: tweak index hero */
+.hero {
+  padding: 1rem 0;
+}
+
+.hero .tagline {
+  font-size: 1.1rem;
+  color: var(--color-foreground-secondary);
+}
+
