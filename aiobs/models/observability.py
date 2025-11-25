@@ -69,6 +69,6 @@ class ObservabilityExport(BaseModel):
     sessions: List[Session]
     events: List[ObservedEvent]
     function_events: List[ObservedFunctionEvent] = Field(default_factory=list)
-    trace_tree: List[Any] = Field(default_factory=list)  # Nested tree structure
+    trace_tree: Optional[List[Any]] = Field(default=None)  # Nested tree structure (optional)
     generated_at: float
     version: int = 1

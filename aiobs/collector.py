@@ -74,8 +74,12 @@ class Collector:
             self._sessions[self._active_session] = sess.model_copy(update={"ended_at": _now()})
             self._active_session = None
 
-    def flush(self, path: Optional[str] = None) -> str:
+    def flush(self, path: Optional[str] = None, include_trace_tree: bool = True) -> str:
         """Flush all sessions and events to a single JSON file.
+
+        Args:
+            path: Output file path. Defaults to LLM_OBS_OUT env var or 'llm_observability.json'.
+            include_trace_tree: Whether to include the nested trace_tree structure. Defaults to True.
 
         Returns the output path used.
         """
@@ -100,15 +104,15 @@ class Collector:
                             ObservedEvent(session_id=sid, **ev.model_dump())
                         )
 
-            # Build trace tree from function events
-            trace_tree = _build_trace_tree(function_events)
+            # Build trace tree from function events (if enabled)
+            trace_tree = _build_trace_tree(function_events) if include_trace_tree else []
 
             # Build a single JSON payload via pydantic models
             export = ObservabilityExport(
                 sessions=list(self._sessions.values()),
                 events=standard_events,
                 function_events=function_events,
-                trace_tree=trace_tree,
+                trace_tree=trace_tree if include_trace_tree else None,
                 generated_at=_now(),
             )
 
