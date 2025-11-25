@@ -11,7 +11,9 @@ from .models import (
     Session as ObsSession,
     SessionMeta as ObsSessionMeta,
     Event as ObsEvent,
+    FunctionEvent as ObsFunctionEvent,
     ObservedEvent,
+    ObservedFunctionEvent,
     ObservabilityExport,
 )
 
@@ -78,14 +80,25 @@ class Collector:
             if out_dir and not os.path.exists(out_dir):
                 os.makedirs(out_dir, exist_ok=True)
 
+            # Separate standard events from function events
+            standard_events = []
+            function_events = []
+            for sid, evs in self._events.items():
+                for ev in evs:
+                    if isinstance(ev, ObsFunctionEvent):
+                        function_events.append(
+                            ObservedFunctionEvent(session_id=sid, **ev.model_dump())
+                        )
+                    else:
+                        standard_events.append(
+                            ObservedEvent(session_id=sid, **ev.model_dump())
+                        )
+
             # Build a single JSON payload via pydantic models
             export = ObservabilityExport(
                 sessions=list(self._sessions.values()),
-                events=[
-                    ObservedEvent(session_id=sid, **ev.model_dump())
-                    for sid, evs in self._events.items()
-                    for ev in evs
-                ],
+                events=standard_events,
+                function_events=function_events,
                 generated_at=_now(),
             )
 
@@ -149,11 +162,15 @@ class Collector:
             sid = self._active_session
             if not sid:
                 return
-            if isinstance(payload, ObsEvent):
+            if isinstance(payload, (ObsEvent, ObsFunctionEvent)):
                 ev = payload
             else:
                 try:
-                    ev = ObsEvent(**payload)
+                    # Try to detect if this is a function event
+                    if payload.get("provider") == "function" and "name" in payload:
+                        ev = ObsFunctionEvent(**payload)
+                    else:
+                        ev = ObsEvent(**payload)
                 except Exception:
                     # Best-effort fallback for unexpected shapes
                     ev = ObsEvent(

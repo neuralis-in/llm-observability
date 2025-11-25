@@ -29,6 +29,59 @@ observer.flush()      # write a single JSON file to disk
 
 By default, events flush to `./llm_observability.json`. Override with `LLM_OBS_OUT=/path/to/file.json`.
 
+## Function Tracing with `@observe`
+
+Trace any function (sync or async) by decorating it with `@observe`:
+
+```python
+from aiobs import observer, observe
+
+@observe
+def research(query: str) -> list:
+    # your logic here
+    return results
+
+@observe(name="custom_name")
+async def fetch_data(url: str) -> dict:
+    # async logic here
+    return data
+
+observer.observe(session_name="my-pipeline")
+research("What is an API?")
+observer.end()
+observer.flush()
+```
+
+### Decorator Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `name` | function name | Custom display name for the traced function |
+| `capture_args` | `True` | Whether to capture function arguments |
+| `capture_result` | `True` | Whether to capture the return value |
+
+```python
+# Don't capture sensitive arguments
+@observe(capture_args=False)
+def login(username: str, password: str):
+    ...
+
+# Don't capture large return values
+@observe(capture_result=False)
+def get_large_dataset():
+    ...
+```
+
+### What Gets Captured
+
+For each decorated function call:
+- Function name and module
+- Input arguments (args/kwargs)
+- Return value
+- Timing: start/end timestamps, `duration_ms`
+- Errors: exception name and message if the call fails
+- Callsite: file path, line number where the function was defined
+
 ## Run the Example
 
 - Simple single-file example:
@@ -52,9 +105,11 @@ By default, events flush to `./llm_observability.json`. Override with `LLM_OBS_O
 
 Internally, the SDK structures data with Pydantic models (v2):
 
-- `aiobs.models.Session`
-- `aiobs.models.Event`
+- `aiobs.models.Session` – Session metadata
+- `aiobs.models.Event` – LLM provider call event (e.g., OpenAI)
+- `aiobs.models.FunctionEvent` – Decorated function trace event
 - `aiobs.models.ObservedEvent` (Event + `session_id`)
+- `aiobs.models.ObservedFunctionEvent` (FunctionEvent + `session_id`)
 - `aiobs.models.ObservabilityExport` (flush payload)
 
 These are exported to allow downstream tooling to parse and validate the JSON output and to build integrations.

@@ -29,7 +29,7 @@ def test_observer_flush_json_structure(tmp_path):
     assert os.path.exists(written)
 
     data = json.loads(out_path.read_text())
-    assert set(data.keys()) == {"sessions", "events", "generated_at", "version"}
+    assert set(data.keys()) == {"sessions", "events", "function_events", "generated_at", "version"}
     assert isinstance(data["sessions"], list) and data["sessions"], "sessions should not be empty"
     assert isinstance(data["events"], list) and data["events"], "events should not be empty"
     e = data["events"][0]

@@ -3,7 +3,9 @@ from .observability import (
     Session,
     Callsite,
     Event,
+    FunctionEvent,
     ObservedEvent,
+    ObservedFunctionEvent,
     ObservabilityExport,
 )
 
@@ -12,6 +14,8 @@ __all__ = [
     "Session",
     "Callsite",
     "Event",
+    "FunctionEvent",
     "ObservedEvent",
+    "ObservedFunctionEvent",
     "ObservabilityExport",
 ]

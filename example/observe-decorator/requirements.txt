@@ -1,0 +1,6 @@
+# No external dependencies required!
+# This example only uses the aiobs package and Python standard library.
+#
+# Install aiobs from the repo root:
+#   pip install -e .
+

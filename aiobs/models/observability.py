@@ -36,12 +36,34 @@ class Event(BaseModel):
     callsite: Optional[Callsite] = Field(default=None)
 
 
+class FunctionEvent(BaseModel):
+    """Event model for tracing decorated functions."""
+    provider: str = Field(default="function")
+    api: str  # Function name (qualified)
+    name: str  # Display name for the function
+    module: Optional[str] = Field(default=None)
+    args: Optional[List[Any]] = Field(default=None)
+    kwargs: Optional[dict] = Field(default=None)
+    result: Optional[Any] = Field(default=None)
+    error: Optional[str] = Field(default=None)
+    started_at: float
+    ended_at: float
+    duration_ms: float
+    callsite: Optional[Callsite] = Field(default=None)
+
+
 class ObservedEvent(Event):
+    session_id: str
+
+
+class ObservedFunctionEvent(FunctionEvent):
+    """Function event with session_id for export."""
     session_id: str
 
 
 class ObservabilityExport(BaseModel):
     sessions: List[Session]
     events: List[ObservedEvent]
+    function_events: List[ObservedFunctionEvent] = Field(default_factory=list)
     generated_at: float
     version: int = 1

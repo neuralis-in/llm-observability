@@ -1,0 +1,16 @@
+# Core dependencies
+pydantic>=2
+
+# OpenAI provider support (optional)
+openai>=1.0.0,<2
+
+# Example dependencies (optional)
+python-dotenv>=1.0
+
+# Testing (optional)
+pytest>=7
+
+# Documentation (optional)
+# sphinx>=7
+# furo>=2024.1.29
+
