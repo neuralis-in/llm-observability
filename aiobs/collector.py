@@ -151,12 +151,16 @@ class Collector:
             all_events_for_tree = standard_events + function_events
             trace_tree = _build_trace_tree(all_events_for_tree) if include_trace_tree else []
 
+            # Build enh_prompt_traces by extracting nodes with enh_prompt=True
+            enh_prompt_traces = _extract_enh_prompt_traces(trace_tree) if include_trace_tree else None
+
             # Build a single JSON payload via pydantic models
             export = ObservabilityExport(
                 sessions=list(self._sessions.values()),
                 events=standard_events,
                 function_events=function_events,
                 trace_tree=trace_tree if include_trace_tree else None,
+                enh_prompt_traces=enh_prompt_traces if enh_prompt_traces else None,
                 generated_at=_now(),
             )
 
@@ -460,3 +464,26 @@ def _build_trace_tree(events: List[Union[ObservedEvent, ObservedFunctionEvent]])
 
     sort_by_time(roots)
     return roots
+
+
+def _extract_enh_prompt_traces(trace_tree: List[Dict[str, Any]]) -> List[str]:
+    """Extract enh_prompt_id values from the trace tree.
+    
+    Returns a list of enh_prompt_id values for nodes with enh_prompt=True.
+    """
+    result: List[str] = []
+    
+    def walk(nodes: List[Dict[str, Any]]) -> None:
+        for node in nodes:
+            # Check if this node has enh_prompt=True and has an enh_prompt_id
+            if node.get("enh_prompt") is True:
+                enh_prompt_id = node.get("enh_prompt_id")
+                if enh_prompt_id:
+                    result.append(enh_prompt_id)
+            # Recurse into children
+            children = node.get("children", [])
+            if children:
+                walk(children)
+    
+    walk(trace_tree)
+    return result

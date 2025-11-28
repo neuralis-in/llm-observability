@@ -73,6 +73,8 @@ def observe(
     name: Optional[str] = None,
     capture_args: bool = True,
     capture_result: bool = True,
+    enh_prompt: bool = False,
+    auto_enhance_after: Optional[int] = None,
 ) -> Callable[[F], F]: ...
 
 
@@ -82,6 +84,8 @@ def observe(
     name: Optional[str] = None,
     capture_args: bool = True,
     capture_result: bool = True,
+    enh_prompt: bool = False,
+    auto_enhance_after: Optional[int] = None,
 ) -> Union[F, Callable[[F], F]]:
     """
     Decorator to trace function execution.
@@ -93,11 +97,18 @@ def observe(
         @observe(name="custom_name")
         def my_func(): ...
 
+        @observe(enh_prompt=True, auto_enhance_after=10)
+        def my_func(): ...
+
     Args:
         func: The function to wrap (when used without parentheses)
         name: Optional custom name for the traced function
         capture_args: Whether to capture function arguments (default: True)
         capture_result: Whether to capture the return value (default: True)
+        enh_prompt: Whether to include this trace in enh_prompt_traces for
+            enhanced prompt analysis (default: False)
+        auto_enhance_after: Number of traces after which to run auto prompt
+            enhancer (only relevant when enh_prompt=True)
 
     Returns:
         The wrapped function that records execution traces
@@ -157,6 +168,9 @@ def observe(
                         except Exception:
                             pass
 
+                    # Generate enh_prompt_id if enh_prompt is enabled
+                    enh_prompt_id = str(uuid.uuid4()) if enh_prompt else None
+
                     event = FunctionEvent(
                         provider="function",
                         api=f"{fn_module}.{fn_qualname}" if fn_module else fn_qualname,
@@ -172,6 +186,9 @@ def observe(
                         callsite=callsite,
                         span_id=span_id,
                         parent_span_id=parent_span_id,
+                        enh_prompt=enh_prompt,
+                        enh_prompt_id=enh_prompt_id,
+                        auto_enhance_after=auto_enhance_after,
                     )
                     observer._record_event(event)
 
@@ -225,6 +242,9 @@ def observe(
                         except Exception:
                             pass
 
+                    # Generate enh_prompt_id if enh_prompt is enabled
+                    enh_prompt_id = str(uuid.uuid4()) if enh_prompt else None
+
                     event = FunctionEvent(
                         provider="function",
                         api=f"{fn_module}.{fn_qualname}" if fn_module else fn_qualname,
@@ -240,6 +260,9 @@ def observe(
                         callsite=callsite,
                         span_id=span_id,
                         parent_span_id=parent_span_id,
+                        enh_prompt=enh_prompt,
+                        enh_prompt_id=enh_prompt_id,
+                        auto_enhance_after=auto_enhance_after,
                     )
                     observer._record_event(event)
 

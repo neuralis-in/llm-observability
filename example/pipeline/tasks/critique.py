@@ -1,3 +1,6 @@
+from aiobs.observe import observe
+
+@observe(enh_prompt=True, threshold=10)
 def critique(draft: str, client, model: str) -> str:
     """Critique and refine a draft answer for clarity and accuracy."""
     messages = [

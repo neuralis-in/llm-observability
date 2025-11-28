@@ -32,7 +32,7 @@ def simple_generation():
     print(f"Response: {response.text}")
     return response.text
 
-@observe
+@observe(enh_prompt=True)
 def generation_with_system_instruction():
     """Generation with system instruction example."""
     creds_manager = CredentialsManager()

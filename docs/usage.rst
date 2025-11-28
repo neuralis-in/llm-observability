@@ -76,6 +76,12 @@ Decorator Options
    * - ``capture_result``
      - ``True``
      - Whether to capture the return value
+   * - ``enh_prompt``
+     - ``False``
+     - Mark trace for enhanced prompt analysis
+   * - ``auto_enhance_after``
+     - ``None``
+     - Number of traces after which to run auto prompt enhancer
 
 Examples::
 
@@ -88,6 +94,33 @@ Examples::
     @observe(capture_result=False)
     def get_large_dataset():
         ...
+
+Enhanced Prompt Tracing
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Mark functions for automatic prompt enhancement analysis::
+
+    from aiobs import observer, observe
+
+    @observe(enh_prompt=True, auto_enhance_after=10)
+    def summarize(text: str) -> str:
+        """After 10 traces, auto prompt enhancer will run."""
+        response = client.chat.completions.create(...)
+        return response.choices[0].message.content
+
+    @observe(enh_prompt=True, auto_enhance_after=5)
+    def analyze(data: dict) -> dict:
+        """Different threshold for this function."""
+        return process(data)
+
+When ``enh_prompt=True``, the decorator generates a unique ``enh_prompt_id`` for each function call.
+The JSON output includes:
+
+- ``enh_prompt_id``: Unique identifier for each enhanced prompt trace
+- ``auto_enhance_after``: Configured threshold for auto-enhancement
+- ``enh_prompt_traces``: List of all ``enh_prompt_id`` values in the export
+
+This allows collecting traces across multiple JSON files and rendering them in a UI for analysis.
 
 Pipeline Example
 ----------------
@@ -126,3 +159,4 @@ For decorated functions (``@observe``):
 - Timing: start/end timestamps, ``duration_ms``
 - Errors: exception name and message if the call fails
 - Callsite: file path, line number where the function was defined
+- Enhanced prompt metadata (``enh_prompt_id``, ``auto_enhance_after``) when enabled

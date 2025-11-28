@@ -28,7 +28,7 @@ from aiobs import observer, observe  # noqa: E402
 # Example 1: Basic function tracing
 # =============================================================================
 
-@observe
+@observe(enh_prompt=True)
 def fibonacci(n: int) -> int:
     """Calculate the nth Fibonacci number (iterative)."""
     if n <= 1:
@@ -75,7 +75,7 @@ def authenticate(username: str, password: str) -> bool:
 # Example 5: Hiding large return values
 # =============================================================================
 
-@observe(capture_result=False)
+@observe(capture_result=False, enh_prompt=True)
 def generate_large_data(size: int) -> list:
     """Generate a large list (result won't be captured to save space)."""
     return list(range(size))

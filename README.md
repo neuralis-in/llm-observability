@@ -128,6 +128,8 @@ observer.flush()
 | `name` | function name | Custom display name for the traced function |
 | `capture_args` | `True` | Whether to capture function arguments |
 | `capture_result` | `True` | Whether to capture the return value |
+| `enh_prompt` | `False` | Mark trace for enhanced prompt analysis |
+| `auto_enhance_after` | `None` | Number of traces after which to run auto prompt enhancer |
 
 ```python
 # Don't capture sensitive arguments
@@ -150,6 +152,37 @@ For each decorated function call:
 - Timing: start/end timestamps, `duration_ms`
 - Errors: exception name and message if the call fails
 - Callsite: file path, line number where the function was defined
+- Enhanced prompt metadata (`enh_prompt_id`, `auto_enhance_after`) when enabled
+
+### Enhanced Prompt Tracing
+
+Mark functions for automatic prompt enhancement analysis:
+
+```python
+from aiobs import observer, observe
+
+@observe(enh_prompt=True, auto_enhance_after=10)
+def summarize(text: str) -> str:
+    """After 10 traces, auto prompt enhancer will run."""
+    response = client.chat.completions.create(...)
+    return response.choices[0].message.content
+
+@observe(enh_prompt=True, auto_enhance_after=5)
+def analyze(data: dict) -> dict:
+    """Different threshold for this function."""
+    return process(data)
+
+observer.observe()
+summarize("Hello world")
+analyze({"key": "value"})
+observer.end()
+observer.flush()
+```
+
+The JSON output will include:
+- `enh_prompt_id`: Unique identifier for each enhanced prompt trace
+- `auto_enhance_after`: Configured threshold for auto-enhancement
+- `enh_prompt_traces`: List of all `enh_prompt_id` values for easy lookup across multiple JSON files
 
 ## Run the Examples
 

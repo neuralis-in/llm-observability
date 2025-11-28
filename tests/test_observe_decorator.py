@@ -436,3 +436,307 @@ class TestObserveDecoratorNoSession:
         assert result == "result"
         # Should not crash, just not record anything
 
+
+class TestObserveDecoratorEnhPrompt:
+    """Test @observe with enh_prompt feature."""
+
+    def test_enh_prompt_false_by_default(self):
+        """enh_prompt should be False by default."""
+
+        @observe
+        def regular_func(x):
+            return x * 2
+
+        observer.observe("test-enh-prompt-default")
+        regular_func(5)
+        observer.end()
+
+        events = list(observer._events.values())[0]
+        ev = events[0]
+        assert ev.enh_prompt is False
+        assert ev.enh_prompt_id is None
+        assert ev.auto_enhance_after is None
+
+    def test_enh_prompt_enabled(self):
+        """enh_prompt=True should set flag and generate enh_prompt_id."""
+
+        @observe(enh_prompt=True)
+        def enhanced_func(x):
+            return x * 2
+
+        observer.observe("test-enh-prompt-enabled")
+        enhanced_func(5)
+        observer.end()
+
+        events = list(observer._events.values())[0]
+        ev = events[0]
+        assert ev.enh_prompt is True
+        assert ev.enh_prompt_id is not None
+        # enh_prompt_id should be a valid UUID string
+        import uuid
+        uuid.UUID(ev.enh_prompt_id)  # Should not raise
+
+    def test_enh_prompt_with_auto_enhance_after(self):
+        """auto_enhance_after should be captured when enh_prompt=True."""
+
+        @observe(enh_prompt=True, auto_enhance_after=10)
+        def enhanced_func(x):
+            return x * 2
+
+        observer.observe("test-auto-enhance-after")
+        enhanced_func(5)
+        observer.end()
+
+        events = list(observer._events.values())[0]
+        ev = events[0]
+        assert ev.enh_prompt is True
+        assert ev.auto_enhance_after == 10
+
+    def test_multiple_enh_prompt_functions_unique_ids(self):
+        """Each enh_prompt function call should get a unique enh_prompt_id."""
+
+        @observe(enh_prompt=True, auto_enhance_after=5)
+        def func_a(x):
+            return x + 1
+
+        @observe(enh_prompt=True, auto_enhance_after=10)
+        def func_b(x):
+            return x + 2
+
+        observer.observe("test-multiple-enh-prompt")
+        func_a(1)
+        func_b(2)
+        func_a(3)  # Second call to func_a
+        observer.end()
+
+        events = list(observer._events.values())[0]
+        assert len(events) == 3
+
+        enh_prompt_ids = [ev.enh_prompt_id for ev in events]
+        # All IDs should be unique
+        assert len(set(enh_prompt_ids)) == 3
+        # All should be valid UUIDs
+        import uuid
+        for eid in enh_prompt_ids:
+            uuid.UUID(eid)
+
+    def test_nested_enh_prompt_functions(self):
+        """Nested enh_prompt functions should each have their own enh_prompt_id."""
+
+        @observe(enh_prompt=True, auto_enhance_after=5)
+        def outer(x):
+            return inner(x * 2)
+
+        @observe(enh_prompt=True, auto_enhance_after=10)
+        def inner(x):
+            return x + 1
+
+        observer.observe("test-nested-enh-prompt")
+        outer(5)
+        observer.end()
+
+        events = list(observer._events.values())[0]
+        assert len(events) == 2
+
+        outer_ev = next(ev for ev in events if ev.name == "outer")
+        inner_ev = next(ev for ev in events if ev.name == "inner")
+
+        assert outer_ev.enh_prompt is True
+        assert inner_ev.enh_prompt is True
+        assert outer_ev.enh_prompt_id != inner_ev.enh_prompt_id
+        assert outer_ev.auto_enhance_after == 5
+        assert inner_ev.auto_enhance_after == 10
+
+    def test_mixed_enh_prompt_and_regular_functions(self):
+        """Mix of enh_prompt and regular functions should work correctly."""
+
+        @observe(enh_prompt=True, auto_enhance_after=5)
+        def enhanced(x):
+            return regular(x * 2)
+
+        @observe
+        def regular(x):
+            return x + 1
+
+        observer.observe("test-mixed-enh-prompt")
+        enhanced(5)
+        observer.end()
+
+        events = list(observer._events.values())[0]
+        assert len(events) == 2
+
+        enhanced_ev = next(ev for ev in events if ev.name == "enhanced")
+        regular_ev = next(ev for ev in events if ev.name == "regular")
+
+        assert enhanced_ev.enh_prompt is True
+        assert enhanced_ev.enh_prompt_id is not None
+        assert regular_ev.enh_prompt is False
+        assert regular_ev.enh_prompt_id is None
+
+    def test_async_enh_prompt(self):
+        """enh_prompt should work with async functions."""
+        import asyncio
+
+        @observe(enh_prompt=True, auto_enhance_after=3)
+        async def async_enhanced(x):
+            await asyncio.sleep(0.001)
+            return x * 2
+
+        observer.observe("test-async-enh-prompt")
+        result = asyncio.run(async_enhanced(5))
+        observer.end()
+
+        assert result == 10
+        events = list(observer._events.values())[0]
+        ev = events[0]
+        assert ev.enh_prompt is True
+        assert ev.enh_prompt_id is not None
+        assert ev.auto_enhance_after == 3
+
+
+class TestObserveDecoratorEnhPromptExport:
+    """Test JSON export with enh_prompt features."""
+
+    def test_export_enh_prompt_traces_list(self, tmp_path):
+        """enh_prompt_traces should be a list of enh_prompt_ids."""
+
+        @observe(enh_prompt=True, auto_enhance_after=5)
+        def func_a(x):
+            return x + 1
+
+        @observe(enh_prompt=True, auto_enhance_after=10)
+        def func_b(x):
+            return x + 2
+
+        @observe
+        def regular(x):
+            return x * 2
+
+        observer.observe("test-export-enh-prompt-traces")
+        func_a(1)
+        func_b(2)
+        regular(3)
+        observer.end()
+
+        out_path = tmp_path / "obs.json"
+        observer.flush(str(out_path))
+
+        data = json.loads(out_path.read_text())
+
+        # enh_prompt_traces should contain only IDs from enh_prompt=True functions
+        assert "enh_prompt_traces" in data
+        assert isinstance(data["enh_prompt_traces"], list)
+        assert len(data["enh_prompt_traces"]) == 2
+
+        # Get IDs from function_events for verification
+        enh_ids_from_events = [
+            ev["enh_prompt_id"]
+            for ev in data["function_events"]
+            if ev.get("enh_prompt") is True
+        ]
+        assert set(data["enh_prompt_traces"]) == set(enh_ids_from_events)
+
+    def test_export_enh_prompt_id_in_trace_tree(self, tmp_path):
+        """enh_prompt_id should be present in trace_tree nodes."""
+
+        @observe(enh_prompt=True, auto_enhance_after=5)
+        def outer(x):
+            return inner(x * 2)
+
+        @observe(enh_prompt=True, auto_enhance_after=10)
+        def inner(x):
+            return x + 1
+
+        observer.observe("test-export-trace-tree-enh-id")
+        outer(5)
+        observer.end()
+
+        out_path = tmp_path / "obs.json"
+        observer.flush(str(out_path))
+
+        data = json.loads(out_path.read_text())
+
+        # Check trace_tree has enh_prompt_id
+        assert len(data["trace_tree"]) == 1
+        root = data["trace_tree"][0]
+        assert root["name"] == "outer"
+        assert root["enh_prompt"] is True
+        assert root["enh_prompt_id"] is not None
+        assert root["auto_enhance_after"] == 5
+
+        # Check nested child
+        assert len(root["children"]) == 1
+        child = root["children"][0]
+        assert child["name"] == "inner"
+        assert child["enh_prompt"] is True
+        assert child["enh_prompt_id"] is not None
+        assert child["auto_enhance_after"] == 10
+
+        # IDs should be different
+        assert root["enh_prompt_id"] != child["enh_prompt_id"]
+
+    def test_export_function_event_fields_enh_prompt(self, tmp_path):
+        """Function events should include all enh_prompt fields."""
+
+        @observe(enh_prompt=True, auto_enhance_after=7)
+        def my_func(a):
+            return a * 2
+
+        observer.observe("test-export-enh-fields")
+        my_func(5)
+        observer.end()
+
+        out_path = tmp_path / "obs.json"
+        observer.flush(str(out_path))
+
+        data = json.loads(out_path.read_text())
+        ev = data["function_events"][0]
+
+        assert ev["enh_prompt"] is True
+        assert ev["enh_prompt_id"] is not None
+        assert ev["auto_enhance_after"] == 7
+
+    def test_export_no_enh_prompt_traces_when_none(self, tmp_path):
+        """enh_prompt_traces should be None/empty when no enh_prompt functions."""
+
+        @observe
+        def regular_func(x):
+            return x * 2
+
+        observer.observe("test-export-no-enh-traces")
+        regular_func(5)
+        observer.end()
+
+        out_path = tmp_path / "obs.json"
+        observer.flush(str(out_path))
+
+        data = json.loads(out_path.read_text())
+
+        # Should be empty list or None
+        enh_traces = data.get("enh_prompt_traces")
+        assert enh_traces is None or enh_traces == []
+
+    def test_export_enh_prompt_traces_across_multiple_calls(self, tmp_path):
+        """Multiple calls to same enh_prompt function should each generate unique ID."""
+
+        @observe(enh_prompt=True, auto_enhance_after=5)
+        def repeatable(x):
+            return x * 2
+
+        observer.observe("test-export-multiple-calls")
+        repeatable(1)
+        repeatable(2)
+        repeatable(3)
+        observer.end()
+
+        out_path = tmp_path / "obs.json"
+        observer.flush(str(out_path))
+
+        data = json.loads(out_path.read_text())
+
+        assert len(data["enh_prompt_traces"]) == 3
+        assert len(data["function_events"]) == 3
+
+        # All IDs should be unique
+        assert len(set(data["enh_prompt_traces"])) == 3
+

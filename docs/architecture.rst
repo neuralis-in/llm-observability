@@ -62,6 +62,48 @@ Example trace tree structure::
       ]
     }
 
+Enhanced Prompt Traces
+----------------------
+
+Functions decorated with ``@observe(enh_prompt=True)`` are tracked separately for prompt analysis:
+
+- Each call generates a unique ``enh_prompt_id`` (UUID).
+- The ``auto_enhance_after`` parameter specifies how many traces before auto-enhancement runs.
+- The ``enh_prompt_traces`` field in the export contains a list of all ``enh_prompt_id`` values.
+
+Example with enhanced prompt tracing::
+
+    @observe(enh_prompt=True, auto_enhance_after=10)
+    def summarize(text: str) -> str:
+        response = client.chat.completions.create(...)
+        return response.choices[0].message.content
+
+The JSON export will include::
+
+    {
+      "function_events": [
+        {
+          "name": "summarize",
+          "enh_prompt": true,
+          "enh_prompt_id": "bd089fd9-7d25-46df-8a6f-028cf06410f7",
+          "auto_enhance_after": 10,
+          ...
+        }
+      ],
+      "trace_tree": [
+        {
+          "name": "summarize",
+          "enh_prompt_id": "bd089fd9-7d25-46df-8a6f-028cf06410f7",
+          "children": [...]
+        }
+      ],
+      "enh_prompt_traces": [
+        "bd089fd9-7d25-46df-8a6f-028cf06410f7"
+      ]
+    }
+
+This structure allows collecting and analyzing enhanced prompt traces across multiple JSON files.
+
 Extending aiobs
 ---------------
 

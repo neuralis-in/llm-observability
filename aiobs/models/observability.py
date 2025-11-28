@@ -54,6 +54,9 @@ class FunctionEvent(BaseModel):
     callsite: Optional[Callsite] = Field(default=None)
     span_id: Optional[str] = Field(default=None)
     parent_span_id: Optional[str] = Field(default=None)
+    enh_prompt: bool = Field(default=False)
+    enh_prompt_id: Optional[str] = Field(default=None)  # Unique ID for enh_prompt traces
+    auto_enhance_after: Optional[int] = Field(default=None)  # Number of traces after which to run auto prompt enhancer
 
 
 class ObservedEvent(Event):
@@ -70,5 +73,6 @@ class ObservabilityExport(BaseModel):
     events: List[ObservedEvent]
     function_events: List[ObservedFunctionEvent] = Field(default_factory=list)
     trace_tree: Optional[List[Any]] = Field(default=None)  # Nested tree structure (optional)
+    enh_prompt_traces: Optional[List[str]] = Field(default=None)  # List of enh_prompt_id values
     generated_at: float
     version: int = 1
