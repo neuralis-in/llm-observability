@@ -77,6 +77,58 @@ Key lines::
     observer.end()
     observer.flush()
 
+Gemini Video Generation (Veo)
+-----------------------------
+
+aiobs automatically instruments Google's Veo video generation API (``models.generate_videos``)::
+
+    from aiobs import observer
+    from google import genai
+
+    observer.observe()
+
+    client = genai.Client()
+    operation = client.models.generate_videos(
+        model="veo-3.1-generate-preview",
+        prompt="A cinematic shot of waves crashing on a beach at sunset",
+    )
+
+    # Poll until video is ready
+    while not operation.done:
+        time.sleep(10)
+        operation = client.operations.get(operation)
+
+    observer.end()
+    observer.flush()
+
+The captured data includes:
+
+- **Request**: model, prompt, image (for image-to-video), video (for video extension), config
+- **Response**: operation_name, done status, generated_videos metadata
+- **Timing**: start/end timestamps, ``duration_ms``
+- **Config options**: aspect_ratio, resolution, number_of_videos, generate_audio, etc.
+
+For image-to-video generation::
+
+    from aiobs import observer
+    from google import genai
+
+    observer.observe()
+
+    client = genai.Client()
+    operation = client.models.generate_videos(
+        model="veo-3.1-generate-preview",
+        prompt="Animate this landscape",
+        image=image_object,  # Generated or loaded image
+        config={
+            "aspect_ratio": "16:9",
+            "resolution": "720p",
+        }
+    )
+
+    observer.end()
+    observer.flush()
+
 Function Tracing with @observe
 ------------------------------
 
@@ -185,9 +237,9 @@ What Gets Captured
 For each LLM API call:
 
 - **Provider**: ``openai`` or ``gemini``
-- **API**: e.g., ``chat.completions.create``, ``embeddings.create``, or ``models.generateContent``
-- **Request**: model, messages/contents/input, core parameters
-- **Response**: text (for completions), embeddings (for embeddings API), model, token usage (when available)
+- **API**: e.g., ``chat.completions.create``, ``embeddings.create``, ``models.generate_content``, or ``models.generate_videos``
+- **Request**: model, messages/contents/input/prompt, core parameters
+- **Response**: text (for completions), embeddings (for embeddings API), operation info (for video generation), model, token usage (when available)
 - **Timing**: start/end timestamps, ``duration_ms``
 - **Errors**: exception name and message if the call fails
 - **Callsite**: file path, line number, and function name where the API was called

@@ -5,6 +5,12 @@ from .generate_content import (
     GenerateContentRequest,
     GenerateContentResponse,
 )
+from .generate_videos import (
+    VideoGenerationConfig,
+    GenerateVideosRequest,
+    GeneratedVideo,
+    GenerateVideosResponse,
+)
 
 __all__ = [
     "BaseGeminiRequest",
@@ -13,5 +19,9 @@ __all__ = [
     "Content",
     "GenerateContentRequest",
     "GenerateContentResponse",
+    "VideoGenerationConfig",
+    "GenerateVideosRequest",
+    "GeneratedVideo",
+    "GenerateVideosResponse",
 ]
 

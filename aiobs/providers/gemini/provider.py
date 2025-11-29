@@ -5,6 +5,7 @@ from typing import Any, Callable, List, Optional
 from ..base import BaseProvider
 from .apis.base_api import BaseGeminiAPIModule
 from .apis.generate_content import GenerateContentAPI
+from .apis.generate_videos import GenerateVideosAPI
 
 
 class GeminiProvider(BaseProvider):
@@ -17,7 +18,7 @@ class GeminiProvider(BaseProvider):
     def is_available(cls) -> bool:
         # Available if any sub-module is available
         try:
-            return GenerateContentAPI.is_available()
+            return GenerateContentAPI.is_available() or GenerateVideosAPI.is_available()
         except Exception:
             return False
 
@@ -28,6 +29,8 @@ class GeminiProvider(BaseProvider):
         modules: List[BaseGeminiAPIModule] = []
         if GenerateContentAPI.is_available():
             modules.append(GenerateContentAPI())
+        if GenerateVideosAPI.is_available():
+            modules.append(GenerateVideosAPI())
 
         for mod in modules:
             try:

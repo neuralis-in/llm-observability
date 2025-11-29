@@ -104,6 +104,11 @@ Gemini API Modules
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: aiobs.providers.gemini.apis.generate_videos
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Gemini API Models
 """""""""""""""""
 
@@ -113,6 +118,11 @@ Gemini API Models
    :show-inheritance:
 
 .. automodule:: aiobs.providers.gemini.apis.models.generate_content
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: aiobs.providers.gemini.apis.models.generate_videos
    :members:
    :undoc-members:
    :show-inheritance:

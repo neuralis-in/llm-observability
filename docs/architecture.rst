@@ -25,13 +25,14 @@ Providers
 - ``providers/gemini/provider.py``: orchestrates API modules.
 - ``providers/gemini/apis/base_api.py``: base for API modules.
 - ``providers/gemini/apis/generate_content.py``: instruments ``models.generate_content``.
+- ``providers/gemini/apis/generate_videos.py``: instruments ``models.generate_videos`` (Veo video generation).
 - ``providers/gemini/apis/models/*``: Pydantic models for per-API request/response.
 
 Flow
 ----
 
 1. Call ``observer.observe()`` to start a session and install providers.
-2. Make LLM API calls (e.g., OpenAI Chat Completions, Gemini Generate Content).
+2. Make LLM API calls (e.g., OpenAI Chat Completions, Gemini Generate Content, Gemini Generate Videos).
 3. Providers build typed request/response models and record an ``Event`` with timing and callsite.
 4. ``observer.flush()`` serializes an ``ObservabilityExport`` JSON file.
 
