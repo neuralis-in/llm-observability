@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 # Default shepherd server URL for usage tracking
 SHEPHERD_SERVER_URL = "https://shepherd-api-48963996968.us-central1.run.app"
 
+# Default flush server URL for trace ingestion
+FLUSH_SERVER_URL = "https://aiobs-flush-server-48963996968.us-central1.run.app"
+
 # Context variable to track current span for nested tracing
 _current_span_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "_current_span_id", default=None
@@ -232,7 +235,10 @@ class Collector:
         exporter: Optional["BaseExporter"] = None,
         **exporter_kwargs: Any,
     ) -> Union[str, "ExportResult"]:
-        """Flush all sessions and events to a file or custom exporter.
+        """Flush all sessions and events to a file or custom exporter, and send to the API.
+
+        The data is always sent to the Shepherd flush server API for ingestion.
+        Additionally, data is saved to the provided exporter or to a local JSON file.
 
         Args:
             path: Output file path. Defaults to LLM_OBS_OUT env var or '<session-id>.json'.
@@ -280,6 +286,10 @@ class Collector:
                 enh_prompt_traces=enh_prompt_traces if enh_prompt_traces else None,
                 generated_at=_now(),
             )
+
+            # Send to flush server API (async, non-blocking)
+            if self._api_key:
+                self._send_to_flush_server(export)
 
             # Use exporter if provided
             if exporter is not None:
@@ -590,6 +600,56 @@ class Collector:
                 raise RuntimeError(f"Failed to record usage: HTTP {e.code}")
         except urllib.error.URLError as e:
             raise RuntimeError(f"Failed to connect to shepherd server: {e.reason}")
+
+    def _send_to_flush_server(self, export: ObservabilityExport) -> None:
+        """Send trace data to the flush server API.
+
+        This method sends the observability data to the Shepherd flush server
+        for ingestion. The request is made in a background thread to avoid
+        blocking the main application.
+
+        Args:
+            export: The ObservabilityExport object containing all trace data.
+        """
+        if not self._api_key:
+            return
+
+        def _send() -> None:
+            import urllib.request
+            import urllib.error
+
+            url = f"{FLUSH_SERVER_URL}/v1/traces"
+            payload = export.model_dump()
+            data = json.dumps(payload).encode("utf-8")
+            headers = {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            }
+
+            try:
+                req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                    logger.debug(
+                        "Traces sent to flush server: status=%s, session_id=%s",
+                        result.get("status"),
+                        result.get("session_id"),
+                    )
+            except urllib.error.HTTPError as e:
+                if e.code == 401:
+                    logger.warning("Failed to send traces: Invalid API key")
+                elif e.code == 429:
+                    logger.warning("Failed to send traces: Rate limit exceeded")
+                else:
+                    logger.warning("Failed to send traces: HTTP %d", e.code)
+            except urllib.error.URLError as e:
+                logger.warning("Failed to connect to flush server: %s", e.reason)
+            except Exception as e:
+                logger.warning("Failed to send traces: %s", str(e))
+
+        # Send in background thread to avoid blocking
+        thread = threading.Thread(target=_send, daemon=True)
+        thread.start()
 
     def _record_event(self, payload: Any) -> None:
         with self._lock:
