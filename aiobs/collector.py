@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import contextvars
+import functools
 import json
 import logging
 import os
 import threading
 import time
 import uuid
-from typing import Any, Callable, Dict, List, Optional, Union, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Set, Union, TYPE_CHECKING, TypeVar
 
 from .models import (
     Session as ObsSession,
@@ -23,6 +25,8 @@ if TYPE_CHECKING:
     from .exporters.base import BaseExporter, ExportResult
 
 logger = logging.getLogger(__name__)
+
+F = TypeVar("F", bound=Callable[..., Any])
 
 # Default shepherd server URL for usage tracking
 SHEPHERD_SERVER_URL = "https://shepherd-api-48963996968.us-central1.run.app"
@@ -51,6 +55,8 @@ class Collector:
         self._unpatchers: List[Callable[[], None]] = []
         self._providers: List[Any] = []  # instances of BaseProvider
         self._api_key: Optional[str] = None
+        # Sessions detached for background task handling
+        self._detached_sessions: Set[str] = set()
 
     # Public API
     def observe(
@@ -104,6 +110,10 @@ class Collector:
         with self._lock:
             if not self._active_session:
                 return
+            # Skip if session is detached (will be ended by background task)
+            if self._active_session in self._detached_sessions:
+                self._active_session = None
+                return
             sess = self._sessions[self._active_session]
             self._sessions[self._active_session] = sess.model_copy(update={"ended_at": _now()})
             self._active_session = None
@@ -114,7 +124,7 @@ class Collector:
         include_trace_tree: bool = True,
         exporter: Optional["BaseExporter"] = None,
         **exporter_kwargs: Any,
-    ) -> Union[str, "ExportResult"]:
+    ) -> Optional[Union[str, "ExportResult"]]:
         """Flush all sessions and events to a file or custom exporter.
 
         Args:
@@ -127,9 +137,14 @@ class Collector:
 
         Returns:
             If exporter is provided: ExportResult from the exporter.
-            Otherwise: The output file path used.
+            If local file: The output file path used.
+            If all sessions are detached (handled by background tasks): None.
         """
         with self._lock:
+            # Check if all sessions are detached (being handled by background tasks)
+            if self._sessions and all(sid in self._detached_sessions for sid in self._sessions):
+                # All sessions are detached, skip flush - background tasks will handle it
+                return None
             # Separate standard events from function events
             standard_events = []
             function_events = []
@@ -205,6 +220,105 @@ class Collector:
             self._active_session = None
             return out_path
 
+    def background_task(
+        self,
+        func: F,
+        exporter: Optional["BaseExporter"] = None,
+        path: Optional[str] = None,
+        include_trace_tree: bool = True,
+        **flush_kwargs: Any,
+    ) -> F:
+        """Wrap a background task function to capture traces and auto-flush on completion.
+
+        When this method is called, the current session is "detached" from the
+        calling context. This means:
+        1. Subsequent calls to end() and flush() in the calling context become no-ops
+        2. The wrapped function automatically calls end() and flush() when it completes
+        3. All traces from the background task are properly captured
+
+        This is designed to work seamlessly with FastAPI's BackgroundTasks, asyncio tasks,
+        or any deferred execution pattern.
+
+        Args:
+            func: The function to wrap (sync or async).
+            exporter: Optional exporter instance for flush (e.g., GCSExporter).
+            path: Optional output file path for flush (ignored if exporter is provided).
+            include_trace_tree: Whether to include trace tree in flush output.
+            **flush_kwargs: Additional arguments passed to flush().
+
+        Returns:
+            A wrapped function that will auto-flush on completion.
+
+        Example:
+            @app.post("/generate")
+            async def generate(request: Request, background_tasks: BackgroundTasks):
+                try:
+                    observer.observe(session_name="my_session")
+
+                    background_tasks.add_task(
+                        observer.background_task(my_task_func, exporter=my_exporter),
+                        request.data
+                    )
+
+                    return {"status": "started"}
+                finally:
+                    observer.end()   # No-op because session is detached
+                    observer.flush() # No-op because session is detached
+        """
+        with self._lock:
+            session_id = self._active_session
+            api_key = self._api_key
+            if session_id:
+                # Mark this session as detached
+                self._detached_sessions.add(session_id)
+
+        def _do_flush(sid: str) -> None:
+            """Perform the actual flush for a detached session."""
+            with self._lock:
+                # Remove from detached set
+                self._detached_sessions.discard(sid)
+                # Restore session as active for proper end/flush
+                self._active_session = sid
+                self._api_key = api_key
+
+            # End and flush the session
+            self.end()
+            self.flush(
+                path=path,
+                include_trace_tree=include_trace_tree,
+                exporter=exporter,
+                **flush_kwargs,
+            )
+
+        if asyncio.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                # Restore session context for the background task
+                with self._lock:
+                    self._active_session = session_id
+                    self._api_key = api_key
+                try:
+                    return await func(*args, **kwargs)
+                finally:
+                    if session_id:
+                        _do_flush(session_id)
+
+            return async_wrapper  # type: ignore[return-value]
+        else:
+            @functools.wraps(func)
+            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                # Restore session context for the background task
+                with self._lock:
+                    self._active_session = session_id
+                    self._api_key = api_key
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    if session_id:
+                        _do_flush(session_id)
+
+            return sync_wrapper  # type: ignore[return-value]
+
     # Internal API
     def _install_instrumentation(self) -> None:
         # If no providers explicitly registered, attempt to include built-ins
@@ -248,6 +362,7 @@ class Collector:
             self._sessions.clear()
             self._events.clear()
             self._api_key = None
+            self._detached_sessions.clear()
 
             # Unpatch providers
             for up in reversed(self._unpatchers):
