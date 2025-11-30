@@ -332,6 +332,59 @@ By default, ``observer.flush()`` writes ``./llm_observability.json``. Override w
 
     LLM_OBS_OUT=/path/to/output.json python your_script.py
 
+Async Flush (Non-Blocking Server Upload)
+----------------------------------------
+
+When ``observer.flush()`` is called, trace data is automatically sent to the aiobs cloud server
+for ingestion. This upload happens **asynchronously in a background thread**, ensuring your
+application is not blocked waiting for the network request to complete.
+
+How It Works
+^^^^^^^^^^^^
+
+1. ``flush()`` writes data locally (to file or exporter) immediately
+2. A background daemon thread sends the data to the aiobs flush server
+3. Your application continues execution without waiting for the upload
+4. Errors during upload are logged but do not raise exceptions
+
+Example::
+
+    from aiobs import observer
+
+    observer.observe(api_key="aiobs_sk_...")
+
+    # ... your LLM calls ...
+
+    observer.end()
+    observer.flush()  # Returns immediately after local write
+    # Background thread handles server upload asynchronously
+
+    # Your app continues without delay
+    print("Done!")
+
+Benefits
+^^^^^^^^
+
+- **Non-blocking**: Main application thread is never blocked by network I/O
+- **Fault-tolerant**: Upload failures are logged but don't crash your application
+- **Automatic**: No additional configuration required—async upload is enabled by default
+
+.. note::
+
+   The background upload requires a valid API key. If no API key is configured,
+   data is only written locally and not sent to the server.
+
+Error Handling
+^^^^^^^^^^^^^^
+
+Upload errors are handled gracefully and logged as warnings:
+
+- **401 Unauthorized**: Invalid API key
+- **429 Too Many Requests**: Rate limit exceeded
+- **Network errors**: Connection failures
+
+Check your application logs for upload status messages when debugging.
+
 What Gets Captured
 ------------------
 

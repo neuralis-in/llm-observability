@@ -34,7 +34,30 @@ Flow
 1. Call ``observer.observe()`` to start a session and install providers.
 2. Make LLM API calls (e.g., OpenAI Chat Completions, Gemini Generate Content, Gemini Generate Videos).
 3. Providers build typed request/response models and record an ``Event`` with timing and callsite.
-4. ``observer.flush()`` serializes an ``ObservabilityExport`` JSON file.
+4. ``observer.flush()`` serializes an ``ObservabilityExport`` JSON file and sends data to the server.
+
+Async Flush
+-----------
+
+When ``flush()`` is called, trace data is sent to the aiobs cloud server for ingestion
+using a **non-blocking background thread**:
+
+1. Local export (file write or custom exporter) happens synchronously
+2. A daemon thread is spawned to upload data to the flush server
+3. ``flush()`` returns immediately without waiting for upload completion
+4. Upload errors are logged but do not propagate exceptions
+
+This design ensures:
+
+- **Zero latency impact**: Your application is never blocked by network I/O
+- **Graceful degradation**: Network failures don't crash your application
+- **Fire-and-forget**: No callback handling or async/await required
+
+.. code-block:: python
+
+    observer.flush()  # Returns immediately
+    # Background thread: POST /v1/traces to flush server
+    # Main thread: continues execution
 
 Trace Tree
 ----------
