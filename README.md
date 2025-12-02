@@ -1,13 +1,31 @@
 # aiobs
 
-A tiny, extensible observability layer for LLM calls. Add three lines around your code and get JSON traces for requests, responses, timings, and errors.
+`aiobs` is a lightweight Python library that adds **observability** to AI/LLM applications. Trace every call, capture inputs/outputs, measure latency, and debug failures—with just 3 lines of code. Built-in support for OpenAI and Google Gemini.
+
+> **Goal:** Make every AI call inspectable, measurable, and debuggable with minimal code changes.
+
+---
+
+## 🚀 Features
+
+- Decorator-based function tracing using `@observe`
+- Automatic input/output capture
+- Execution timing & latency
+- Exception logging
+- Structured trace models
+- Built-in support for OpenAI and Google Gemini APIs
+- Extensible architecture for custom providers
+
+---
 
 ## Supported Providers
 
 - **OpenAI** — Chat Completions API, Embeddings API (`openai>=1.0`)
 - **Google Gemini** — Generate Content API (`google-genai>=1.0`)
 
-## Quick Install
+---
+
+## Installation
 
 ```bash
 # Core only
@@ -23,11 +41,11 @@ pip install aiobs[gemini]
 pip install aiobs[all]
 ```
 
-## Get Your API Key
+---
 
-An API key is required to use aiobs. Get your free API key from:
-
-👉 **https://neuralis-in.github.io/shepherd/api-keys**
+## API Key Setup
+An API key is required to use aiobs. Get your free API key from:  
+👉 [https://neuralis-in.github.io/shepherd/api-keys](https://neuralis-in.github.io/shepherd/api-keys)
 
 Once you have your API key, set it as an environment variable:
 
@@ -41,6 +59,14 @@ Or add it to your `.env` file:
 AIOBS_API_KEY=aiobs_sk_your_key_here
 ```
 
+Or pass directly:
+
+```python
+observer.observe(api_key="aiobs_sk_your_key_here")
+```
+
+---
+
 ## Quick Start
 
 ```python
@@ -52,11 +78,18 @@ observer.end()        # end the session
 observer.flush()      # write a single JSON file to disk
 ```
 
-You can also pass the API key directly:
+---
 
-```python
-observer.observe(api_key="aiobs_sk_your_key_here")
-```
+## How It Works
+
+aiobs installs lightweight hooks into supported SDKs (OpenAI, Gemini, etc.). Whenever an LLM call or an `@observe`-decorated function runs, aiobs captures:
+
+1. **Session** — metadata (name, id, labels, timestamps)
+2. **Events** — requests, responses, timings, errors
+3. **Flush** — outputs a single JSON file
+
+**No servers. No background threads. No lock-in.**  
+Everything stays local unless you export it.
 
 ### Session Labels
 
@@ -82,7 +115,9 @@ observer.remove_label("experiment_id")
 labels = observer.get_labels()
 ```
 
-By default, events flush to `./llm_observability.json`. Override with `LLM_OBS_OUT=/path/to/file.json`.
+**Default output file:**
+
+`./llm_observability.json`. Override with `LLM_OBS_OUT=/path/to/file.json`.
 
 ## Provider Examples
 
@@ -165,36 +200,31 @@ observer.flush()
 
 ### Decorator Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `name` | function name | Custom display name for the traced function |
-| `capture_args` | `True` | Whether to capture function arguments |
-| `capture_result` | `True` | Whether to capture the return value |
-| `enh_prompt` | `False` | Mark trace for enhanced prompt analysis |
-| `auto_enhance_after` | `None` | Number of traces after which to run auto prompt enhancer |
+| Option               | Default       | Description                     |
+| -------------------- | ------------- | ------------------------------- |
+| `name`               | function name | Custom display name             |
+| `capture_args`       | `True`        | Capture function arguments      |
+| `capture_result`     | `True`        | Capture return value            |
+| `enh_prompt`         | `False`       | Enable enhanced prompt analysis |
+| `auto_enhance_after` | `None`        | Auto-enhance after N traces     |
+
+### Examples
+
+Don't capture sensitive arguments:
 
 ```python
-# Don't capture sensitive arguments
 @observe(capture_args=False)
 def login(username: str, password: str):
     ...
-
-# Don't capture large return values
-@observe(capture_result=False)
-def get_large_dataset():
-    ...
 ```
 
-### What Gets Captured
+Skip large return values:
 
-For each decorated function call:
-- Function name and module
-- Input arguments (args/kwargs)
-- Return value
-- Timing: start/end timestamps, `duration_ms`
-- Errors: exception name and message if the call fails
-- Callsite: file path, line number where the function was defined
-- Enhanced prompt metadata (`enh_prompt_id`, `auto_enhance_after`) when enabled
+```python
+@observe(capture_result=False)
+def load_dataset():
+    ...
+```
 
 ### Enhanced Prompt Tracing
 
@@ -221,7 +251,7 @@ observer.end()
 observer.flush()
 ```
 
-The JSON output will include:
+Captured JSON output will include:
 - `enh_prompt_id`: Unique identifier for each enhanced prompt trace
 - `auto_enhance_after`: Configured threshold for auto-enhancement
 - `enh_prompt_traces`: List of all `enh_prompt_id` values for easy lookup across multiple JSON files
@@ -243,7 +273,9 @@ The JSON output will include:
   python -m example.pipeline.main "Explain vector databases to a backend engineer"
   ```
 
-## What Gets Captured (LLM Calls)
+## What Gets Captured
+
+### LLM API Calls
 
 - **Provider**: `openai` or `gemini`
 - **API**: e.g., `chat.completions.create`, `embeddings.create`, or `models.generateContent`
@@ -252,6 +284,96 @@ The JSON output will include:
 - **Timing**: start/end timestamps, `duration_ms`
 - **Errors**: exception name and message if the call fails
 - **Callsite**: file path, line number, and function name where the API was called
+
+### Function Traces (@observe)
+
+- Function name and module
+- Input arguments (configurable via `capture_args`)
+- Return value (configurable via `capture_result`)
+- Execution timing and duration
+- Exception details on failure
+- Enhanced prompt metadata when enabled
+
+---
+
+## Output Structure
+
+### Example Output
+
+<details>
+<summary>Click to expand full JSON trace</summary>
+
+```json
+{
+  "sessions": [
+    {
+      "id": "sess_abc123",
+      "name": "production-pipeline",
+      "started_at": 1733135400.123456,
+      "ended_at": 1733135402.789012,
+      "meta": {
+        "pid": 12345,
+        "cwd": "/app"
+      },
+      "labels": {
+        "environment": "production"
+      }
+    }
+  ],
+  "events": [
+    {
+      "session_id": "sess_abc123",
+      "provider": "openai",
+      "api": "chat.completions.create",
+      "request": {
+        "model": "gpt-4o-mini",
+        "messages": [
+          {"role": "user", "content": "What is observability?"}
+        ]
+      },
+      "response": {
+        "text": "Observability is the ability to understand...",
+        "model": "gpt-4o-mini",
+        "usage": {
+          "prompt_tokens": 12,
+          "completion_tokens": 45,
+          "total_tokens": 57
+        }
+      },
+      "started_at": 1733135400.234567,
+      "ended_at": 1733135401.758912,
+      "duration_ms": 1524,
+      "callsite": {
+        "file": "/app/main.py",
+        "line": 15,
+        "function": "main"
+      }
+    }
+  ],
+  "function_events": [
+    {
+      "session_id": "sess_abc123",
+      "provider": "function",
+      "api": "research",
+      "name": "research",
+      "module": "__main__",
+      "args": ["What is an API?"],
+      "kwargs": {},
+      "result": ["result1", "result2"],
+      "started_at": 1733135400.100,
+      "ended_at": 1733135400.113,
+      "duration_ms": 13,
+      "callsite": {
+        "file": "/app/main.py",
+        "line": 8
+      }
+    }
+  ],
+  "generated_at": 1733135402.9,
+  "version": 1
+}
+```
+</details>
 
 ## Data Models
 
@@ -268,7 +390,7 @@ These are exported to allow downstream tooling to parse and validate the JSON ou
 
 ## Extensibility
 
-Providers are classes that implement a small abstract interface and install their own hooks.
+You can add new provider SDKs by subclassing `BaseProvider`:
 
 - Base class: `aiobs.BaseProvider`
 - Built-in: `OpenAIProvider`, `GeminiProvider` (auto-detected and installed if available)
@@ -295,38 +417,83 @@ class MyProvider(BaseProvider):
         def unpatch():
             pass
         return unpatch
-
+        
 # Register before observe()
 observer.register_provider(MyProvider())
 observer.observe()
 ```
 
-## Architecture
+---
 
-- **Core**
-  - `Collector` holds sessions/events and flushes a single JSON file.
-  - `aiobs.models.*` define Pydantic schemas for sessions/events/export.
-- **Providers** (N-layered)
-  - `providers/base.py`: `BaseProvider` interface.
-  - `providers/openai/`: OpenAI Chat Completions and Embeddings instrumentation.
-  - `providers/gemini/`: Google Gemini Generate Content instrumentation.
+## Documentation
 
-Providers construct Pydantic request/response models and pass typed `Event` objects to the collector; only the collector serializes to JSON.
+### Building Docs Locally
 
-## Docs
+```bash
+pip install aiobs[docs]
+python -m sphinx -b html docs docs/_build/html
+```
 
-Sphinx documentation lives under `docs/`.
+Open `docs/_build/html/index.html` in your browser.
 
-- Install docs deps:
-  ```bash
-  pip install aiobs[docs]
-  ```
-- Build HTML docs:
-  ```bash
-  python -m sphinx -b html docs docs/_build/html
-  ```
-- Open `docs/_build/html/index.html` in your browser.
+### Online Documentation
 
-**GitHub Pages**
-- Docs auto-deploy from `main` via GitHub Actions.
-- Site available at: https://neuralis-in.github.io/aiobs/
+Docs auto-deploy via GitHub Actions:  
+👉 [https://neuralis-in.github.io/aiobs/](https://neuralis-in.github.io/aiobs/)
+
+---
+
+## Troubleshooting
+
+### 1. Missing provider (OpenAI/Gemini)
+
+Install the provider extra:
+
+```bash
+pip install aiobs[openai]
+pip install aiobs[gemini]
+```
+
+### 2. Missing API key
+
+Set the API key:
+
+```bash
+export AIOBS_API_KEY=aiobs_sk_...
+```
+
+Or pass directly:
+
+```python
+observer.observe(api_key="...")
+```
+
+Get your key: [https://neuralis-in.github.io/shepherd/api-keys](https://neuralis-in.github.io/shepherd/api-keys)
+
+### 3. No JSON output
+
+You must call both methods:
+
+```python
+observer.end()
+observer.flush()
+```
+
+### 4. Async functions not traced
+
+Use the decorator:
+
+```python
+@observe
+async def my_function():
+    ...
+```
+
+
+## About
+
+aiobs is an open, extensible Python SDK supporting AI observability and agentic traceability as part of the Shepherd project.
+
+👉 [https://neuralis-in.github.io/shepherd/](https://neuralis-in.github.io/shepherd/)  
+👉 [https://github.com/neuralis-in/aiobs](https://github.com/neuralis-in/aiobs)
+
