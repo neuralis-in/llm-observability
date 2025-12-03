@@ -439,13 +439,10 @@ Open `docs/_build/html/index.html` in your browser.
 
 ### Online Documentation
 
-Docs auto-deploy via GitHub Actions:  
-👉 [https://neuralis-in.github.io/aiobs/](https://neuralis-in.github.io/aiobs/)
+Docs auto-deploy via GitHub Actions: [aiobs-docs](https://neuralis-in.github.io/aiobs/)
 
-
+---
 
 ## Community & Support
 
-Join the Zulip community for discussions, help, and feature requests:
-
-👉[https://aiobs.zulipchat.com/](Organisation URL: https://aiobs.zulipchat.com/)
+Join the Zulip community for discussions, help, and feature requests: [aiobs-zulip-chat](https://aiobs.zulipchat.com/)
