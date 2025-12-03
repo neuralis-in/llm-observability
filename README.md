@@ -1,7 +1,7 @@
 # aiobs
+[![PyPI](https://img.shields.io/pypi/v/aiobs)](https://pypi.org/project/aiobs/)
 
-`aiobs` is a lightweight Python library that adds **observability** to AI/LLM applications.  
-It provides tracing, timing, metadata capture, error tracking, and provider-aware instrumentation for OpenAI and Google Gemini.
+`aiobs` is a lightweight Python library that adds **observability** to AI/LLM applications. Trace every call, capture inputs/outputs, measure latency, and debug failures—with just 3 lines of code. Built-in support for OpenAI and Google Gemini.
 
 > **Goal:** Make every AI call inspectable, measurable, and debuggable with minimal code changes.
 
@@ -91,6 +91,7 @@ aiobs installs lightweight hooks into supported SDKs (OpenAI, Gemini, etc.). Whe
 
 **No servers. No background threads. No lock-in.**  
 Everything stays local unless you export it.
+
 ### Session Labels
 
 Add labels for filtering in enterprise dashboards:
@@ -226,16 +227,6 @@ def load_dataset():
     ...
 ```
 
-### What Gets Captured
-
-For each decorated function call:
-- Function name and module
-- Input arguments (args/kwargs)
-- Return value
-- Timing: start/end timestamps, `duration_ms`
-- Errors: exception name and message if the call fails
-- Callsite: file path, line number where the function was defined
-- Enhanced prompt metadata (`enh_prompt_id`, `auto_enhance_after`) when enabled
 ### Enhanced Prompt Tracing
 
 Mark functions for automatic prompt enhancement analysis:
@@ -287,7 +278,7 @@ Captured JSON output will include:
 
 ### LLM API Calls
 
- **Provider**: `openai` or `gemini`
+- **Provider**: `openai` or `gemini`
 - **API**: e.g., `chat.completions.create`, `embeddings.create`, or `models.generateContent`
 - **Request**: model, messages/contents/input, core parameters
 - **Response**: text (for completions), embeddings (for embeddings API), model, token usage (when available)
@@ -315,17 +306,24 @@ Captured JSON output will include:
 
 ```json
 {
-  "session": {
-    "id": "sess_abc123",
-    "name": "production-pipeline",
-    "labels": {
-      "environment": "production"
-    },
-    "start_time": "2025-12-02T10:30:00.123456Z",
-    "end_time": "2025-12-02T10:30:02.789012Z"
-  },
+  "sessions": [
+    {
+      "id": "sess_abc123",
+      "name": "production-pipeline",
+      "started_at": 1733135400.123456,
+      "ended_at": 1733135402.789012,
+      "meta": {
+        "pid": 12345,
+        "cwd": "/app"
+      },
+      "labels": {
+        "environment": "production"
+      }
+    }
+  ],
   "events": [
     {
+      "session_id": "sess_abc123",
       "provider": "openai",
       "api": "chat.completions.create",
       "request": {
@@ -343,8 +341,8 @@ Captured JSON output will include:
           "total_tokens": 57
         }
       },
-      "start_time": "2025-12-02T10:30:00.234567Z",
-      "end_time": "2025-12-02T10:30:01.758912Z",
+      "started_at": 1733135400.234567,
+      "ended_at": 1733135401.758912,
       "duration_ms": 1524,
       "callsite": {
         "file": "/app/main.py",
@@ -355,20 +353,28 @@ Captured JSON output will include:
   ],
   "function_events": [
     {
+      "session_id": "sess_abc123",
+      "provider": "function",
+      "api": "research",
       "name": "research",
       "module": "__main__",
-      "args": {
-        "query": "What is an API?"
-      },
+      "args": ["What is an API?"],
+      "kwargs": {},
       "result": ["result1", "result2"],
+      "started_at": 1733135400.100,
+      "ended_at": 1733135400.113,
       "duration_ms": 13,
       "callsite": {
         "file": "/app/main.py",
         "line": 8
       }
     }
-  ]
+  ],
+  "generated_at": 1733135402.9,
+  "version": 1
 }
+```
+</details>
 
 ## Data Models
 
