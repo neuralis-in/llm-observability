@@ -1,6 +1,7 @@
 """Tests for aiobs.evals module."""
 
 import pytest
+import json
 
 from aiobs.evals import (
     # Base
@@ -18,13 +19,16 @@ from aiobs.evals import (
     LatencyConsistencyConfig,
     PIIDetectionConfig,
     PIIType,
+    HallucinationDetectionConfig,
     # Evaluators
     RegexAssertion,
     SchemaAssertion,
     GroundTruthEval,
     LatencyConsistencyEval,
     PIIDetectionEval,
+    HallucinationDetectionEval,
 )
+from aiobs.llm import LLM, BaseLLM, LLMResponse
 
 
 # =============================================================================
@@ -769,6 +773,560 @@ class TestPIIDetectionEval:
         ))
         assert result.passed  # Doesn't fail
         assert result.details["pii_count"] > 0  # But reports PII
+
+
+# =============================================================================
+# HallucinationDetectionEval Tests
+# =============================================================================
+
+
+class MockOpenAIClient:
+    """Mock OpenAI client for testing."""
+    
+    def __init__(self, response_content: str):
+        self.response_content = response_content
+        self.chat = MockChat(response_content)
+
+
+class MockChat:
+    """Mock chat namespace."""
+    
+    def __init__(self, response_content: str):
+        self.completions = MockCompletions(response_content)
+
+
+class MockCompletions:
+    """Mock completions endpoint."""
+    
+    def __init__(self, response_content: str):
+        self.response_content = response_content
+    
+    def create(self, **kwargs):
+        return MockResponse(self.response_content)
+
+
+class MockResponse:
+    """Mock API response."""
+    
+    def __init__(self, content: str):
+        self.choices = [MockChoice(content)]
+        self.model = "gpt-4o-mini"
+        self.usage = MockUsage()
+
+
+class MockChoice:
+    """Mock response choice."""
+    
+    def __init__(self, content: str):
+        self.message = MockMessage(content)
+
+
+class MockMessage:
+    """Mock message."""
+    
+    def __init__(self, content: str):
+        self.content = content
+
+
+class MockUsage:
+    """Mock usage stats."""
+    prompt_tokens = 100
+    completion_tokens = 50
+    total_tokens = 150
+
+
+class TestHallucinationDetectionEval:
+    """Tests for HallucinationDetectionEval evaluator."""
+    
+    def _create_mock_response(self, score: float, has_hallucinations: bool, hallucinations: list, analysis: str) -> str:
+        """Create a mock JSON response from the judge LLM."""
+        return json.dumps({
+            "score": score,
+            "has_hallucinations": has_hallucinations,
+            "hallucinations": hallucinations,
+            "analysis": analysis,
+        })
+    
+    def test_no_hallucination_passes(self, monkeypatch):
+        """Test output without hallucinations passes."""
+        mock_response = self._create_mock_response(
+            score=1.0,
+            has_hallucinations=False,
+            hallucinations=[],
+            analysis="The output is factually correct and grounded in the context.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="What is the capital of France?",
+            model_output="The capital of France is Paris.",
+            context={"documents": ["Paris is the capital of France."]},
+        ))
+        
+        assert result.passed
+        assert result.score == 1.0
+        assert result.details["has_hallucinations"] is False
+        assert result.details["hallucination_count"] == 0
+    
+    def test_hallucination_detected_fails(self, monkeypatch):
+        """Test output with hallucinations fails."""
+        mock_response = self._create_mock_response(
+            score=0.3,
+            has_hallucinations=True,
+            hallucinations=[
+                {
+                    "claim": "Paris was founded in 250 BC by Julius Caesar",
+                    "reason": "This is historically inaccurate. Paris was not founded by Julius Caesar.",
+                    "severity": "severe",
+                }
+            ],
+            analysis="The output contains a fabricated historical claim.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="What is the capital of France?",
+            model_output="Paris is the capital of France. It was founded in 250 BC by Julius Caesar.",
+            context={"documents": ["Paris is the capital of France."]},
+        ))
+        
+        assert result.failed
+        assert result.score == 0.3
+        assert result.details["has_hallucinations"] is True
+        assert result.details["hallucination_count"] == 1
+    
+    def test_multiple_hallucinations(self, monkeypatch):
+        """Test detecting multiple hallucinations."""
+        mock_response = self._create_mock_response(
+            score=0.2,
+            has_hallucinations=True,
+            hallucinations=[
+                {
+                    "claim": "Written by Charles Dickens",
+                    "reason": "Romeo and Juliet was written by Shakespeare, not Dickens.",
+                    "severity": "severe",
+                },
+                {
+                    "claim": "Written in 1920",
+                    "reason": "The play was written between 1591-1596.",
+                    "severity": "severe",
+                },
+                {
+                    "claim": "Won the Nobel Prize",
+                    "reason": "Nobel Prize didn't exist when the play was written.",
+                    "severity": "severe",
+                },
+            ],
+            analysis="Multiple severe factual errors detected.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Who wrote Romeo and Juliet?",
+            model_output="Romeo and Juliet was written by Charles Dickens in 1920. It won the Nobel Prize.",
+            context={"documents": ["Romeo and Juliet was written by William Shakespeare."]},
+        ))
+        
+        assert result.failed
+        assert result.score == 0.2
+        assert result.details["hallucination_count"] == 3
+    
+    def test_strict_mode(self, monkeypatch):
+        """Test strict mode fails on any hallucination."""
+        # Minor hallucination with high score
+        mock_response = self._create_mock_response(
+            score=0.8,
+            has_hallucinations=True,
+            hallucinations=[
+                {
+                    "claim": "Minor unsupported detail",
+                    "reason": "Cannot be verified from context.",
+                    "severity": "minor",
+                }
+            ],
+            analysis="Minor unsupported claim detected.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        config = HallucinationDetectionConfig(strict=True)
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+            config=config,
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Question",
+            model_output="Answer with minor issue",
+        ))
+        
+        # Even with high score, strict mode fails on any hallucination
+        assert result.failed
+    
+    def test_custom_threshold(self, monkeypatch):
+        """Test custom hallucination threshold."""
+        mock_response = self._create_mock_response(
+            score=0.6,
+            has_hallucinations=True,
+            hallucinations=[
+                {
+                    "claim": "Some claim",
+                    "reason": "Minor issue",
+                    "severity": "minor",
+                }
+            ],
+            analysis="Moderate issues detected.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        # Low threshold - 0.6 should pass
+        config_low = HallucinationDetectionConfig(hallucination_threshold=0.5)
+        evaluator_low = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+            config=config_low,
+        )
+        result_low = evaluator_low.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A",
+        ))
+        assert result_low.passed
+        
+        # High threshold - 0.6 should fail
+        mock_client2 = MockOpenAIClient(mock_response)
+        config_high = HallucinationDetectionConfig(hallucination_threshold=0.8)
+        evaluator_high = HallucinationDetectionEval(
+            client=mock_client2,
+            model="gpt-4o-mini",
+            config=config_high,
+        )
+        result_high = evaluator_high.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A",
+        ))
+        assert result_high.failed
+    
+    def test_with_context_documents(self, monkeypatch):
+        """Test hallucination check with context documents."""
+        mock_response = self._create_mock_response(
+            score=1.0,
+            has_hallucinations=False,
+            hallucinations=[],
+            analysis="Output is grounded in provided documents.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Summarize the document",
+            model_output="The document discusses AI safety.",
+            context={
+                "documents": [
+                    "This paper examines AI safety considerations.",
+                    "We propose new methods for alignment.",
+                ]
+            },
+        ))
+        
+        assert result.passed
+        assert "judge_model" in result.details
+    
+    def test_without_context(self, monkeypatch):
+        """Test hallucination check without context (general factuality)."""
+        mock_response = self._create_mock_response(
+            score=0.9,
+            has_hallucinations=False,
+            hallucinations=[],
+            analysis="Output appears factually correct based on general knowledge.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Who is the CEO of Apple?",
+            model_output="Tim Cook is the CEO of Apple.",
+        ))
+        
+        assert result.passed
+    
+    def test_assertions_in_result(self, monkeypatch):
+        """Test that assertion details are included."""
+        mock_response = self._create_mock_response(
+            score=0.4,
+            has_hallucinations=True,
+            hallucinations=[
+                {
+                    "claim": "Hallucinated claim 1",
+                    "reason": "Not supported",
+                    "severity": "moderate",
+                },
+                {
+                    "claim": "Hallucinated claim 2",
+                    "reason": "Fabricated",
+                    "severity": "severe",
+                },
+            ],
+            analysis="Multiple hallucinations found.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        config = HallucinationDetectionConfig(include_details=True)
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+            config=config,
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A",
+        ))
+        
+        assert result.assertions is not None
+        assert len(result.assertions) == 2
+        assert all(not a.passed for a in result.assertions)
+    
+    def test_json_in_markdown_response(self, monkeypatch):
+        """Test parsing JSON from markdown code block response."""
+        # Response wrapped in markdown code block
+        mock_response = '''Here's my analysis:
+
+```json
+{
+    "score": 0.95,
+    "has_hallucinations": false,
+    "hallucinations": [],
+    "analysis": "No issues found."
+}
+```'''
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A",
+        ))
+        
+        assert result.passed
+        assert result.score == 0.95
+    
+    def test_malformed_response_handling(self, monkeypatch):
+        """Test handling of malformed judge response."""
+        mock_response = "This is not valid JSON at all"
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A",
+        ))
+        
+        # Should handle gracefully with fallback
+        assert result.details.get("parse_error") is True
+        assert result.score == 0.5  # Default fallback score
+    
+    def test_factory_method_with_openai(self, monkeypatch):
+        """Test with_openai factory method."""
+        mock_response = self._create_mock_response(
+            score=1.0,
+            has_hallucinations=False,
+            hallucinations=[],
+            analysis="All good.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = HallucinationDetectionEval.with_openai(
+            client=mock_client,
+            model="gpt-4o",
+            strict=True,
+        )
+        
+        assert evaluator.config.strict is True
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A",
+        ))
+        assert result.passed
+    
+    def test_evaluator_name(self, monkeypatch):
+        """Test evaluator name in results."""
+        mock_response = self._create_mock_response(
+            score=1.0,
+            has_hallucinations=False,
+            hallucinations=[],
+            analysis="OK",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A",
+        ))
+        
+        assert result.eval_name == "hallucination_detection"
+    
+    def test_custom_eval_name(self, monkeypatch):
+        """Test custom eval name via config."""
+        mock_response = self._create_mock_response(
+            score=1.0,
+            has_hallucinations=False,
+            hallucinations=[],
+            analysis="OK",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        config = HallucinationDetectionConfig(name="my_hallucination_check")
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+            config=config,
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A",
+        ))
+        
+        assert result.eval_name == "my_hallucination_check"
+    
+    def test_context_with_sources(self, monkeypatch):
+        """Test context formatting with sources."""
+        mock_response = self._create_mock_response(
+            score=1.0,
+            has_hallucinations=False,
+            hallucinations=[],
+            analysis="Grounded in sources.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="What does the source say?",
+            model_output="The source discusses machine learning.",
+            context={
+                "sources": [
+                    "Source 1: Introduction to ML",
+                    "Source 2: Deep Learning basics",
+                ],
+                "metadata": {"retrieved_at": "2024-01-01"},
+            },
+        ))
+        
+        assert result.passed
+    
+    def test_severity_in_message(self, monkeypatch):
+        """Test that severity counts appear in message."""
+        mock_response = self._create_mock_response(
+            score=0.3,
+            has_hallucinations=True,
+            hallucinations=[
+                {"claim": "C1", "reason": "R1", "severity": "minor"},
+                {"claim": "C2", "reason": "R2", "severity": "severe"},
+                {"claim": "C3", "reason": "R3", "severity": "severe"},
+            ],
+            analysis="Multiple issues.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A",
+        ))
+        
+        assert "3 issue(s)" in result.message
+        assert "severe" in result.message or "minor" in result.message
+
+
+def _has_pytest_asyncio():
+    """Check if pytest-asyncio is available."""
+    try:
+        import pytest_asyncio
+        return True
+    except ImportError:
+        return False
+
+
+@pytest.mark.skipif(not _has_pytest_asyncio(), reason="pytest-asyncio not installed")
+class TestHallucinationDetectionEvalAsync:
+    """Async tests for HallucinationDetectionEval evaluator."""
+    
+    def _create_mock_response(self, score: float, has_hallucinations: bool, hallucinations: list, analysis: str) -> str:
+        """Create a mock JSON response from the judge LLM."""
+        return json.dumps({
+            "score": score,
+            "has_hallucinations": has_hallucinations,
+            "hallucinations": hallucinations,
+            "analysis": analysis,
+        })
+    
+    @pytest.mark.asyncio
+    async def test_async_evaluation(self, monkeypatch):
+        """Test async evaluation works."""
+        mock_response = self._create_mock_response(
+            score=1.0,
+            has_hallucinations=False,
+            hallucinations=[],
+            analysis="No hallucinations.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = HallucinationDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = await evaluator.evaluate_async(EvalInput(
+            user_input="What is 2+2?",
+            model_output="4",
+        ))
+        
+        assert result.passed
+        assert result.score == 1.0
 
 
 # =============================================================================

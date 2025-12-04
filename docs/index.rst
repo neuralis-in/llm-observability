@@ -30,6 +30,7 @@ Comprehensive evaluation framework for LLM outputs:
 - **RegexAssertion** — Check output matches regex patterns
 - **SchemaAssertion** — Validate JSON output against JSON Schema
 - **GroundTruthEval** — Compare output to expected ground truth
+- **HallucinationDetectionEval** — Detect hallucinations using LLM-as-judge
 - **LatencyConsistencyEval** — Check latency statistics
 - **PIIDetectionEval** — Detect PII leakage in outputs
 

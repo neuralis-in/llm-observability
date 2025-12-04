@@ -202,3 +202,50 @@ class PIIDetectionConfig(BaseEvalConfig):
         description="Also check system prompt for PII"
     )
 
+
+class HallucinationDetectionConfig(BaseEvalConfig):
+    """Configuration for hallucination detection evaluator.
+    
+    Uses an LLM-as-judge approach to detect hallucinations in model outputs.
+    The evaluator checks if the model output contains fabricated information
+    that is not supported by the provided context.
+    """
+    
+    model: Optional[str] = Field(
+        default=None,
+        description="Model name for the judge LLM (for logging purposes)"
+    )
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        description="Temperature for the judge LLM (lower = more deterministic)"
+    )
+    check_against_context: bool = Field(
+        default=True,
+        description="Check if output is grounded in provided context"
+    )
+    check_against_input: bool = Field(
+        default=True,
+        description="Check if output is relevant to the user input"
+    )
+    strict: bool = Field(
+        default=False,
+        description="Strict mode: any hallucination results in failure"
+    )
+    hallucination_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Score threshold below which output is considered hallucinated (0-1)"
+    )
+    extract_claims: bool = Field(
+        default=True,
+        description="Extract and evaluate individual claims from the output"
+    )
+    max_claims: int = Field(
+        default=10,
+        ge=1,
+        description="Maximum number of claims to extract and evaluate"
+    )
+

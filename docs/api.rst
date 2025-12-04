@@ -153,3 +153,50 @@ OpenAI Classifier
    :members:
    :undoc-members:
    :show-inheritance:
+
+LLM Abstraction
+---------------
+
+The LLM module provides a unified interface for interacting with different
+LLM providers. It is used internally by LLM-based evaluators like
+``HallucinationDetectionEval``.
+
+LLM Factory
+^^^^^^^^^^^
+
+.. automodule:: aiobs.llm.factory
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Base LLM
+^^^^^^^^
+
+.. automodule:: aiobs.llm.base
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+OpenAI LLM
+^^^^^^^^^^
+
+.. automodule:: aiobs.llm.openai
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Gemini LLM
+^^^^^^^^^^
+
+.. automodule:: aiobs.llm.gemini
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Anthropic LLM
+^^^^^^^^^^^^^
+
+.. automodule:: aiobs.llm.anthropic
+   :members:
+   :undoc-members:
+   :show-inheritance:

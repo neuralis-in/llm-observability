@@ -30,6 +30,9 @@ Status Overview
    * - Correctness
      - Ground-truth comparison
      - ✅
+   * - Correctness
+     - Hallucination detection (LLM-as-judge)
+     - ✅
    * - Safety
      - PII leakage detection
      - ✅
@@ -275,6 +278,121 @@ Match modes:
 - ``contains`` - Output contains expected string
 - ``normalized`` - Whitespace/case normalized comparison
 
+HallucinationDetectionEval
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Detects hallucinations in model outputs using an LLM-as-judge approach.
+This evaluator uses another LLM to analyze if the model output contains
+fabricated, false, or unsupported information.
+
+.. code-block:: python
+
+   from openai import OpenAI
+   from aiobs.evals import HallucinationDetectionEval, EvalInput
+
+   # Initialize with your LLM client
+   client = OpenAI()
+   evaluator = HallucinationDetectionEval(
+       client=client,
+       model="gpt-4o-mini",  # Judge model
+   )
+
+   # Evaluate with context (for RAG use cases)
+   result = evaluator(EvalInput(
+       user_input="What is the capital of France?",
+       model_output="Paris is the capital of France. It was founded by Julius Caesar in 250 BC.",
+       context={
+           "documents": ["Paris is the capital and largest city of France."]
+       }
+   ))
+
+   print(result.status.value)  # "failed" (hallucination detected)
+   print(result.score)  # 0.3
+   print(result.details["hallucinations"])  # List of detected hallucinations
+
+   # Evaluate without context (general factuality check)
+   result = evaluator(EvalInput(
+       user_input="Who is the CEO of Apple?",
+       model_output="Tim Cook is the CEO of Apple.",
+   ))
+   print(result.status.value)  # "passed"
+
+Factory methods for different providers:
+
+.. code-block:: python
+
+   # OpenAI
+   evaluator = HallucinationDetectionEval.with_openai(
+       client=OpenAI(),
+       model="gpt-4o",
+   )
+
+   # Gemini
+   from google import genai
+   evaluator = HallucinationDetectionEval.with_gemini(
+       client=genai.Client(),
+       model="gemini-2.0-flash",
+   )
+
+   # Anthropic
+   from anthropic import Anthropic
+   evaluator = HallucinationDetectionEval.with_anthropic(
+       client=Anthropic(),
+       model="claude-3-sonnet-20240229",
+   )
+
+Configuration options:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 15 55
+
+   * - Option
+     - Default
+     - Description
+   * - ``model``
+     - ``None``
+     - Model name for logging purposes
+   * - ``temperature``
+     - ``0.0``
+     - Temperature for the judge LLM
+   * - ``strict``
+     - ``False``
+     - Fail on any hallucination (regardless of score)
+   * - ``hallucination_threshold``
+     - ``0.5``
+     - Score below which output is considered hallucinated
+   * - ``check_against_context``
+     - ``True``
+     - Check if output is grounded in provided context
+   * - ``extract_claims``
+     - ``True``
+     - Extract and evaluate individual claims
+   * - ``max_claims``
+     - ``10``
+     - Maximum claims to extract and evaluate
+
+Result details:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Field
+     - Description
+   * - ``score``
+     - Hallucination score (1.0 = no hallucinations, 0.0 = completely hallucinated)
+   * - ``has_hallucinations``
+     - Boolean indicating if hallucinations were detected
+   * - ``hallucination_count``
+     - Number of hallucinations found
+   * - ``hallucinations``
+     - List of detected hallucinations with claim, reason, and severity
+   * - ``analysis``
+     - Overall analysis from the judge LLM
+   * - ``judge_model``
+     - Model used for evaluation
+
 Safety Evaluators
 -----------------
 
@@ -452,6 +570,7 @@ The repository includes eval examples at ``example/evals/``:
 - ``regex_assertion_example.py`` - Pattern matching examples
 - ``schema_assertion_example.py`` - JSON schema validation
 - ``ground_truth_example.py`` - Ground truth comparison
+- ``hallucination_detection_example.py`` - Hallucination detection with LLM-as-judge
 - ``latency_consistency_example.py`` - Latency statistics
 - ``pii_detection_example.py`` - PII detection and redaction
 

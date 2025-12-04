@@ -26,6 +26,7 @@ Available Evaluators:
     - RegexAssertion: Check output against regex patterns
     - SchemaAssertion: Validate JSON output against JSON Schema
     - GroundTruthEval: Compare output to expected ground truth
+    - HallucinationDetectionEval: Detect hallucinations using LLM-as-judge
     - LatencyConsistencyEval: Check latency statistics
     - PIIDetectionEval: Detect personally identifiable information
 """
@@ -50,6 +51,7 @@ from .models import (
     LatencyConsistencyConfig,
     PIIDetectionConfig,
     PIIType,
+    HallucinationDetectionConfig,
 )
 
 # Correctness evaluators
@@ -57,6 +59,7 @@ from .correctness import (
     RegexAssertion,
     SchemaAssertion,
     GroundTruthEval,
+    HallucinationDetectionEval,
 )
 
 # Reliability evaluators
@@ -86,10 +89,12 @@ __all__ = [
     "LatencyConsistencyConfig",
     "PIIDetectionConfig",
     "PIIType",
+    "HallucinationDetectionConfig",
     # Correctness evaluators
     "RegexAssertion",
     "SchemaAssertion",
     "GroundTruthEval",
+    "HallucinationDetectionEval",
     # Reliability evaluators
     "LatencyConsistencyEval",
     # Safety evaluators

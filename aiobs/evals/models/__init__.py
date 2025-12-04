@@ -13,6 +13,7 @@ from .configs import (
     LatencyConsistencyConfig,
     PIIDetectionConfig,
     PIIType,
+    HallucinationDetectionConfig,
 )
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     "LatencyConsistencyConfig",
     "PIIDetectionConfig",
     "PIIType",
+    "HallucinationDetectionConfig",
 ]
 
