@@ -3,7 +3,7 @@ import json
 
 from aiobs.evals.base import BaseEval
 from aiobs.evals.models.configs import ToxicityDetectionConfig
-from aiobs.evals.types import EvalInput, EvalResult, EvalStatus
+from ..models import EvalInput, EvalResult, EvalStatus
 class ToxicityDetectionEval(BaseEval):
     """Evaluator that detects toxic content in model outputs using LLM-as-judge.
     
