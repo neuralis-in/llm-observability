@@ -66,8 +66,12 @@ class ToxicityDetectionEval(BaseEval):
     config_class: Type[ToxicityDetectionConfig] = ToxicityDetectionConfig
 
     def __init__(
-            self, 
-            config: Optional[ToxicityDetectionConfig] = None,
+        self,
+        client: Any,
+        model: str,
+        config: Optional[HallucinationDetectionConfig] = None,
+        temperature: float = 0.0,
+        max_tokens: Optional[int] = None,
     ) -> None:
         """Initialize with configuration.
         Args:
