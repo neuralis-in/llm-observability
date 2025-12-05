@@ -25,6 +25,46 @@ class BaseEvalConfig(BaseModel):
         description="Include detailed information in results"
     )
 
+class ToxicityDetectionConfig(BaseEvalConfig):
+    """Configuration for toxicity detection evaluator.
+    
+    Uses an LLM-as-judge approach to detect toxic content in model outputs.
+    """
+    
+    model: Optional[str] = Field(
+        default=None,
+        description="Model name for the judge LLM (for logging purposes)"
+    )
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        description="Temperature for the judge LLM (lower = more deterministic)"
+    )
+    toxicity_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Score threshold above which output is considered toxic (0-1)"
+    )
+    check_input: bool = Field(
+        default=False,
+        description="Also check user input for toxicity"
+    )
+    categories: List[str] = Field(
+        default_factory=lambda: [
+            "hate_speech",
+            "harassment",
+            "violence",
+            "profanity",
+            "discrimination",
+        ],
+        description="Categories of toxicity to detect"
+    )
+    fail_on_detection: bool = Field(
+        default=True,
+        description="Whether to fail the eval if toxicity is detected"
+    )
 
 class RegexAssertionConfig(BaseEvalConfig):
     """Configuration for regex assertion evaluator."""
