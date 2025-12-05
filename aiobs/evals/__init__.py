@@ -76,6 +76,9 @@ from .safety import (
     PIIDetectionEval,
     JailbreakDetectionEval,
 )
+from .safety.toxicity_detection import ToxicityDetectionEval
+from .models.configs import ToxicityDetectionConfig
+
 
 __all__ = [
     # Base
