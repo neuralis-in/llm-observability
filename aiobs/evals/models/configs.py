@@ -288,3 +288,4 @@ class HallucinationDetectionConfig(BaseEvalConfig):
         ge=1,
         description="Maximum number of claims to extract and evaluate"
     )
+
