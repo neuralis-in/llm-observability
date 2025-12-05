@@ -21,6 +21,7 @@ from aiobs.evals import (
     PIIType,
     HallucinationDetectionConfig,
     SQLQueryValidatorConfig,
+    ToxicityDetectionConfig,
     # Evaluators
     RegexAssertion,
     SchemaAssertion,
@@ -29,6 +30,7 @@ from aiobs.evals import (
     PIIDetectionEval,
     HallucinationDetectionEval,
     SQLQueryValidator,
+    ToxicityDetectionEval,
 )
 from aiobs.llm import LLM, BaseLLM, LLMResponse
 
@@ -1329,6 +1331,312 @@ class TestHallucinationDetectionEvalAsync:
         
         assert result.passed
         assert result.score == 1.0
+
+
+# =============================================================================
+# ToxicityDetectionEval Tests
+# =============================================================================
+
+
+class TestToxicityDetectionEval:
+    """Tests for ToxicityDetectionEval evaluator."""
+    
+    def _create_mock_response(self, label: str, score: float, categories: list, explanation: str) -> str:
+        """Create a mock JSON response from the judge LLM."""
+        return json.dumps({
+            "label": label,
+            "score": score,
+            "categories": categories,
+            "explanation": explanation,
+        })
+    
+    def test_non_toxic_output_passes(self, monkeypatch):
+        """Test non-toxic output passes evaluation."""
+        mock_response = self._create_mock_response(
+            label="non-toxic",
+            score=0.1,
+            categories=[],
+            explanation="This is a positive message.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = ToxicityDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Tell me something nice",
+            model_output="You are a wonderful person!",
+        ))
+        
+        assert result.passed
+        assert result.score == 0.9  # 1.0 - max_score (0.1)
+        assert result.details["toxicity_score"] == 0.1
+        assert len(result.details["detected_categories"]) == 0
+    
+    def test_toxic_output_fails(self, monkeypatch):
+        """Test toxic output fails evaluation."""
+        mock_response = self._create_mock_response(
+            label="toxic",
+            score=0.8,
+            categories=["hate_speech"],
+            explanation="This contains hate speech.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = ToxicityDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="What do you think about immigrants?",
+            model_output="I hate all immigrants, they should leave!",
+        ))
+        
+        assert result.failed
+        assert result.score == 0.2  # 1.0 - 0.8
+        assert result.details["toxicity_score"] == 0.8
+        assert "hate_speech" in result.details["detected_categories"]
+    
+    def test_multiple_texts(self, monkeypatch):
+        """Test evaluation with multiple texts (user input and model output)."""
+        mock_responses = [
+            self._create_mock_response(
+                label="non-toxic",
+                score=0.2,
+                categories=[],
+                explanation="User input is fine.",
+            ),
+            self._create_mock_response(
+                label="toxic",
+                score=0.7,
+                categories=["harassment"],
+                explanation="Model output is harassing.",
+            )
+        ]
+        
+        # Create a mock client that returns different responses for each call
+        class CyclingMockClient:
+            def __init__(self):
+                self.index = 0
+                self.chat = self.CyclingMockChat()
+            
+            class CyclingMockChat:
+                def __init__(self):
+                    self.completions = self.CyclingMockCompletions()
+            
+            class CyclingMockCompletions:
+                def __init__(self):
+                    pass
+                
+                def create(self, **kwargs):
+                    nonlocal mock_responses
+                    response = mock_responses[self.index]
+                    self.index = (self.index + 1) % len(mock_responses)
+                    return MockResponse(response)
+        
+        mock_client = CyclingMockClient()
+        
+        config = ToxicityDetectionConfig(check_input=True)
+        evaluator = ToxicityDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+            config=config,
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="You're an idiot!",
+            model_output="No, you're the idiot!",
+        ))
+        
+        assert result.failed
+        assert result.details["toxicity_score"] == 0.7
+        assert "harassment" in result.details["detected_categories"]
+        assert "User input is fine" in result.details["explanation"]
+        assert "Model output is harassing" in result.details["explanation"]
+    
+    def test_custom_threshold(self, monkeypatch):
+        """Test custom toxicity threshold."""
+        mock_response = self._create_mock_response(
+            label="toxic",
+            score=0.4,
+            categories=["profanity"],
+            explanation="Contains profanity.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        # Low threshold (0.5) - 0.4 should pass
+        config_low = ToxicityDetectionConfig(toxicity_threshold=0.5)
+        evaluator_low = ToxicityDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+            config=config_low,
+        )
+        result_low = evaluator_low.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A with profanity",
+        ))
+        assert result_low.passed
+        
+        # High threshold (0.3) - 0.4 should fail
+        mock_client2 = MockOpenAIClient(mock_response)
+        config_high = ToxicityDetectionConfig(toxicity_threshold=0.3)
+        evaluator_high = ToxicityDetectionEval(
+            client=mock_client2,
+            model="gpt-4o-mini",
+            config=config_high,
+        )
+        result_high = evaluator_high.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A with profanity",
+        ))
+        assert result_high.failed
+    
+    def test_fail_on_detection_false(self, monkeypatch):
+        """Test fail_on_detection=False passes but reports toxicity."""
+        mock_response = self._create_mock_response(
+            label="toxic",
+            score =0.7,
+            categories=["violence"],
+            explanation="Contains violent content.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        config = ToxicityDetectionConfig(fail_on_detection=False)
+        evaluator = ToxicityDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+            config=config,
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="Violent content",
+        ))
+        
+        assert result.passed  # Doesn't fail
+        assert result.details["toxicity_score"] > 0  # But reports toxicity
+    
+    def test_custom_categories(self, monkeypatch):
+        """Test evaluation with custom categories."""
+        mock_response = self._create_mock_response(
+            label="toxic",
+            score=0.6,
+            categories=["hate_speech"],
+            explanation="Hate speech detected.",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        config = ToxicityDetectionConfig(categories=["hate_speech", "discrimination"])
+        evaluator = ToxicityDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+            config=config,
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="Hateful content",
+        ))
+        
+        assert result.failed
+        assert "hate_speech" in result.details["detected_categories"]
+    
+    def test_json_in_markdown_response(self, monkeypatch):
+        """Test parsing JSON from markdown code block response."""
+        # Response wrapped in markdown code block
+        mock_response = '''Here's my analysis:
+
+```json
+{
+    "label": "toxic",
+    "score": 0.9,
+    "categories": ["hate_speech"],
+    "explanation": "Hate speech detected."
+}
+```'''
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = ToxicityDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="Hateful content",
+        ))
+        
+        assert result.failed
+        assert result.details["toxicity_score"] == 0.9
+        assert "hate_speech" in result.details["detected_categories"]
+    
+    def test_malformed_response_handling(self, monkeypatch):
+        """Test handling of malformed judge response."""
+        mock_response = "This is not valid JSON at all"
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = ToxicityDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A",
+        ))
+        
+        # Should handle gracefully with error
+        assert result.status == EvalStatus.ERROR
+        assert "JSONDecodeError" in result.message
+    
+    def test_evaluator_name(self, monkeypatch):
+        """Test evaluator name in results."""
+        mock_response = self._create_mock_response(
+            label="non-toxic",
+            score=0.1,
+            categories=[],
+            explanation="OK",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        evaluator = ToxicityDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A",
+        ))
+        
+        assert result.eval_name == "toxicity_detection"
+    
+    def test_custom_eval_name(self, monkeypatch):
+        """Test custom eval name via config."""
+        mock_response = self._create_mock_response(
+            label="non-toxic",
+            score=0.1,
+            categories=[],
+            explanation="OK",
+        )
+        mock_client = MockOpenAIClient(mock_response)
+        
+        config = ToxicityDetectionConfig(name="my_toxicity_check")
+        evaluator = ToxicityDetectionEval(
+            client=mock_client,
+            model="gpt-4o-mini",
+            config=config,
+        )
+        
+        result = evaluator.evaluate(EvalInput(
+            user_input="Q",
+            model_output="A",
+        ))
+        
+        assert result.eval_name == "my_toxicity_check"
 
 
 # =============================================================================

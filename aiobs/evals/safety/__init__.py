@@ -7,5 +7,6 @@ from .toxicity_detection import ToxicityDetectionEval
 
 __all__ = [
     "PIIDetectionEval",
+    "ToxicityDetectionEval",
 ]
 
