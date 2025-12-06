@@ -61,7 +61,7 @@ class ToxicityDetectionEval(BaseEval):
         self,
         client: Any,
         model: str,
-        config: Optional[HallucinationDetectionConfig] = None,
+        config: Optional[ToxicityDetectionConfig] = None,
         temperature: float = 0.0,
         max_tokens: Optional[int] = None,
     ) -> None:
