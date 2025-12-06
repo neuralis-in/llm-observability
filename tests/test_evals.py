@@ -1416,26 +1416,26 @@ class TestToxicityDetectionEval:
         ]
         
         # Create a mock client that returns different responses for each call
-        class CyclingMockClient:
-            def __init__(self):
-                self.index = 0
-                self.chat = self.CyclingMockChat()
-            
-            class CyclingMockChat:
-                def __init__(self):
-                    self.completions = self.CyclingMockCompletions()
-            
-            class CyclingMockCompletions:
-                def __init__(self):
-                    pass
+        class CyclingMockCompletions:
+            def __init__(self, mock_responses, index_ref):
+                self.mock_responses = mock_responses
+                self.index_ref = index_ref
                 
-                def create(self, **kwargs):
-                    nonlocal mock_responses
-                    response = mock_responses[self.index]
-                    self.index = (self.index + 1) % len(mock_responses)
-                    return MockResponse(response)
+            def create(self, **kwargs):
+                response = self.mock_responses[self.index_ref[0]]
+                self.index_ref[0] = (self.index_ref[0] + 1) % len(self.mock_responses)
+                return MockResponse(response)
         
-        mock_client = CyclingMockClient()
+        class CyclingMockChat:
+            def __init__(self, mock_responses, index_ref):
+                self.completions = CyclingMockCompletions(mock_responses, index_ref)
+        
+        class CyclingMockClient:
+            def __init__(self, mock_responses):
+                self.index = [0]  # Use list to allow modification in nested scope
+                self.chat = CyclingMockChat(mock_responses, self.index)
+        
+        mock_client = CyclingMockClient(mock_responses)
         
         config = ToxicityDetectionConfig(check_input=True)
         evaluator = ToxicityDetectionEval(
