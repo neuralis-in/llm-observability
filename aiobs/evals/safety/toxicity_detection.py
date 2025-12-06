@@ -84,7 +84,8 @@ class ToxicityDetectionEval(BaseEval):
         # Store model name for logging
         if self.config.model is None:
             self.config.model = model
-@classmethod
+
+    @classmethod
     def with_openai(
         cls,
         client: Any,
