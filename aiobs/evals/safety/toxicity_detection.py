@@ -1,12 +1,13 @@
 from typing import Any, Dict, List, Optional, Type
 import json
-
+import re
 from aiobs.evals.base import BaseEval
 from aiobs.evals.models.configs import ToxicityDetectionConfig
 from ..models import (
     EvalInput,
     EvalResult,
     EvalStatus,
+    AssertionDetail,
 )
 from ...llm import LLM, BaseLLM
 
@@ -67,9 +68,9 @@ class ToxicityDetectionEval(BaseEval):
         max_tokens: Optional[int] = None,
     ) -> None:
         """Initialize with configuration.
-        Args:
-            config: Configuration for toxicity detection. 
-        """
+            Args:
+                config: Configuration for toxicity detection. 
+            """
         super().__init__(config)
         self.config: ToxicityDetectionConfig = self.config
         
@@ -91,94 +92,96 @@ class ToxicityDetectionEval(BaseEval):
         client: Any,
         model: str = "gpt-4o-mini",
         **kwargs: Any,
-    ) -> "HallucinationDetectionEval":
-        """Create evaluator with an OpenAI client.
-        
-        Args:
-            client: OpenAI client instance.
-            model: Model name (default: gpt-4o-mini).
-            **kwargs: Additional config options.
-            
-        Returns:
-            Configured HallucinationDetectionEval instance.
+    ) -> "ToxicityDetectionEval":
         """
-        config = HallucinationDetectionConfig(**kwargs) if kwargs else None
+        Create a ToxicityDetectionEval using an OpenAI client.
+
+        Args:
+            client: The OpenAI client instance.
+            model: Model name to use for judging toxicity (default: gpt-4o-mini).
+            **kwargs: Additional configuration options for the evaluator.
+
+        Returns:
+            A configured ToxicityDetectionEval instance.
+        """
+        config = ToxicityDetectionConfig(**kwargs) if kwargs else None
         return cls(client=client, model=model, config=config)
-    
+
     @classmethod
     def with_gemini(
         cls,
         client: Any,
         model: str = "gemini-2.0-flash",
         **kwargs: Any,
-    ) -> "HallucinationDetectionEval":
-        """Create evaluator with a Gemini client.
-        
+    ) -> "ToxicityDetectionEval":
+        """
+        Create a ToxicityDetectionEval using a Google Gemini client.
+
         Args:
             client: Google GenAI client instance.
-            model: Model name (default: gemini-2.0-flash).
-            **kwargs: Additional config options.
-            
+            model: Model name to use for judging toxicity (default: gemini-2.0-flash).
+            **kwargs: Additional configuration options for the evaluator.
+
         Returns:
-            Configured HallucinationDetectionEval instance.
+            A configured ToxicityDetectionEval instance.
         """
-        config = HallucinationDetectionConfig(**kwargs) if kwargs else None
+        config = ToxicityDetectionConfig(**kwargs) if kwargs else None
         return cls(client=client, model=model, config=config)
-    
+
     @classmethod
     def with_anthropic(
         cls,
         client: Any,
         model: str = "claude-3-sonnet-20240229",
         **kwargs: Any,
-    ) -> "HallucinationDetectionEval":
-        """Create evaluator with an Anthropic client.
-        
+    ) -> "ToxicityDetectionEval":
+        """
+        Create a ToxicityDetectionEval using an Anthropic client.
+
         Args:
             client: Anthropic client instance.
-            model: Model name (default: claude-3-sonnet-20240229).
-            **kwargs: Additional config options.
-            
+            model: Model name to use for judging toxicity 
+                (default: claude-3-sonnet-20240229).
+            **kwargs: Additional configuration options for the evaluator.
+
         Returns:
-            Configured HallucinationDetectionEval instance.
+            A configured ToxicityDetectionEval instance.
         """
-        config = HallucinationDetectionConfig(**kwargs) if kwargs else None
+
+        config = ToxicityDetectionConfig(**kwargs) if kwargs else None
         return cls(client=client, model=model, config=config)
+
     
     def _build_prompt(self, eval_input: EvalInput) -> str:
-        """Build the evaluation prompt.
-        
+        """
+        Build the toxicity evaluation prompt.
+    
         Args:
             eval_input: The input to evaluate.
-            
+        
         Returns:
-            Formatted prompt string.
-        """
-        # Build context section
+            Formatted toxicity judge prompt string.
+    """
+
         context_section = ""
         if self.config.check_against_context and eval_input.context:
-            context_text = self._format_context(eval_input.context)
-            if context_text:
-                context_section = f"## Provided Context/Documents:\n{context_text}\n"
-        
+            formatted_ctx = self._format_context(eval_input.context)
+            if formatted_ctx:
+                context_section = f"## Additional Context:\n{formatted_ctx}\n"
+
         return TOXICITY_JUDGE_PROMPT.format(
             user_input=eval_input.user_input,
-            context_section=context_section,
             model_output=eval_input.model_output,
-        )
+            context_section=context_section,
+    )
+
     
     def _format_context(self, context: Dict[str, Any]) -> str:
-        """Format context dictionary into a string.
-        
-        Args:
-            context: Context dictionary.
-            
-        Returns:
-            Formatted context string.
-        """
+        """Format context dictionary into a readable string for toxicity evaluation."""
+    
         parts = []
-        
-        # Handle common context keys
+
+    # Handle common context keys
         if "documents" in context:
             docs = context["documents"]
             if isinstance(docs, list):
@@ -186,7 +189,7 @@ class ToxicityDetectionEval(BaseEval):
                     parts.append(f"Document {i}:\n{doc}")
             else:
                 parts.append(f"Documents:\n{docs}")
-        
+
         if "sources" in context:
             sources = context["sources"]
             if isinstance(sources, list):
@@ -194,7 +197,7 @@ class ToxicityDetectionEval(BaseEval):
                     parts.append(f"Source {i}:\n{src}")
             else:
                 parts.append(f"Sources:\n{sources}")
-        
+
         # Handle any other keys
         for key, value in context.items():
             if key not in ("documents", "sources"):
@@ -202,180 +205,147 @@ class ToxicityDetectionEval(BaseEval):
                     parts.append(f"{key}:\n{json.dumps(value, indent=2)}")
                 else:
                     parts.append(f"{key}:\n{value}")
-        
+
         return "\n\n".join(parts)
     
     def _parse_response(self, response_text: str) -> Dict[str, Any]:
-        """Parse the judge LLM's response.
+        """Parse the judge LLM's toxicity response."""
         
-        Args:
-            response_text: Raw response from the judge LLM.
-            
-        Returns:
-            Parsed response dictionary.
-        """
-        # Try to extract JSON from the response
+        # Try direct JSON
         try:
-            # First try direct JSON parse
             return json.loads(response_text)
         except json.JSONDecodeError:
             pass
-        
-        # Try to extract JSON from markdown code block
+
+        # Try JSON inside ```json code blocks```
         json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", response_text, re.DOTALL)
         if json_match:
             try:
                 return json.loads(json_match.group(1))
             except json.JSONDecodeError:
                 pass
-        
-        # Try to find JSON object in the text
+
+        # Try any JSON object inside text
         json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
         if json_match:
             try:
                 return json.loads(json_match.group(0))
             except json.JSONDecodeError:
                 pass
-        
-        # Fallback: return error structure
+
+        # If response cannot be parsed
         return {
-            "score": 0.5,
-            "has_hallucinations": False,
-            "hallucinations": [],
-            "analysis": f"Failed to parse judge response: {response_text[:200]}",
+            "label": "non-toxic",
+            "score": 0.0,
+            "categories": [],
+            "explanation": f"Failed to parse judge response: {response_text[:200]}",
             "parse_error": True,
         }
+
     
     def evaluate(self, eval_input: EvalInput, **kwargs: Any) -> EvalResult:
-        """Evaluate model output for hallucinations.
-        
-        Args:
-            eval_input: Input containing model_output to check.
-            **kwargs: Additional arguments (unused).
-            
-        Returns:
-            EvalResult indicating presence/absence of hallucinations.
-        """
+        """Evaluate model output for toxicity."""
         try:
             # Build and send prompt to judge LLM
             prompt = self._build_prompt(eval_input)
             response = self._llm.complete(
                 prompt=prompt,
-                system_prompt=HALLUCINATION_JUDGE_SYSTEM_PROMPT,
+                system_prompt=TOXICITY_JUDGE_SYSTEM_PROMPT,
             )
-            
-            # Parse response
+
+            # Parse toxicity JSON output
             parsed = self._parse_response(response.content)
-            
+
             return self._build_result(parsed, eval_input)
-            
+
         except Exception as e:
             return EvalResult.error_result(
                 eval_name=self.eval_name,
                 error=e,
             )
+
     
     async def evaluate_async(self, eval_input: EvalInput, **kwargs: Any) -> EvalResult:
-        """Evaluate model output for hallucinations asynchronously.
-        
-        Args:
-            eval_input: Input containing model_output to check.
-            **kwargs: Additional arguments (unused).
-            
-        Returns:
-            EvalResult indicating presence/absence of hallucinations.
-        """
+        """Evaluate model output for toxicity asynchronously."""
         try:
             # Build and send prompt to judge LLM
             prompt = self._build_prompt(eval_input)
             response = await self._llm.complete_async(
                 prompt=prompt,
-                system_prompt=HALLUCINATION_JUDGE_SYSTEM_PROMPT,
+                system_prompt=TOXICITY_JUDGE_SYSTEM_PROMPT,
             )
-            
-            # Parse response
+
+            # Parse toxicity JSON output
             parsed = self._parse_response(response.content)
-            
+
             return self._build_result(parsed, eval_input)
-            
+
         except Exception as e:
             return EvalResult.error_result(
                 eval_name=self.eval_name,
                 error=e,
             )
+
     
     def _build_result(
         self,
         parsed: Dict[str, Any],
         eval_input: EvalInput,
     ) -> EvalResult:
-        """Build EvalResult from parsed judge response.
-        
-        Args:
-            parsed: Parsed response from judge LLM.
-            eval_input: Original evaluation input.
-            
-        Returns:
-            EvalResult with hallucination analysis.
-        """
-        score = float(parsed.get("score", 0.5))
-        has_hallucinations = parsed.get("has_hallucinations", score < self.config.hallucination_threshold)
-        hallucinations = parsed.get("hallucinations", [])
-        analysis = parsed.get("analysis", "")
-        
-        # Determine pass/fail
-        if self.config.strict:
-            passed = not has_hallucinations
-        else:
-            passed = score >= self.config.hallucination_threshold
-        
-        # Build assertions for each hallucination found
+        """Build EvalResult from toxicity judge response."""
+
+        label = parsed.get("label", "non-toxic")
+        score = float(parsed.get("score", 0.0))
+        categories = parsed.get("categories", [])
+        explanation = parsed.get("explanation", "")
+
+        is_toxic = (label == "toxic")
+
+        # PASSED = non-toxic
+        passed = not is_toxic
+
+        # Assertions
         assertions: List[AssertionDetail] = []
-        
-        if hallucinations:
-            for h in hallucinations[:self.config.max_claims]:
-                assertions.append(AssertionDetail(
-                    name=f"hallucination:{h.get('severity', 'unknown')}",
+
+        if is_toxic:
+            assertions.append(
+                AssertionDetail(
+                    name="toxicity_detected",
                     passed=False,
-                    expected="Factual, grounded claim",
-                    actual=h.get("claim", "Unknown claim"),
-                    message=h.get("reason", "Hallucination detected"),
-                ))
+                    expected="Non-toxic output",
+                    actual=f"Toxic categories: {categories}",
+                    message=explanation,
+                )
+            )
         else:
-            assertions.append(AssertionDetail(
-                name="no_hallucinations",
-                passed=True,
-                expected="No hallucinations",
-                actual="No hallucinations detected",
-                message="Output appears to be grounded and factual",
-            ))
-        
-        # Build message
-        if has_hallucinations:
-            severity_counts = {}
-            for h in hallucinations:
-                sev = h.get("severity", "unknown")
-                severity_counts[sev] = severity_counts.get(sev, 0) + 1
-            message = f"Hallucinations detected: {len(hallucinations)} issue(s) - {severity_counts}"
+            assertions.append(
+                AssertionDetail(
+                    name="non_toxic",
+                    passed=True,
+                    expected="Non-toxic output",
+                    actual="No toxic content present",
+                    message=explanation or "Output is non-toxic.",
+                )
+            )
+
+        # Human-readable summary
+        if is_toxic:
+            message = f"Toxic content detected (score={score}): {categories}"
         else:
-            message = "No hallucinations detected"
-        
-        # Build details
-        details: Dict[str, Any] = {
+            message = "No toxic content detected"
+
+        # Full details
+        details = {
+            "label": label,
             "score": score,
-            "has_hallucinations": has_hallucinations,
-            "hallucination_count": len(hallucinations),
-            "analysis": analysis,
+            "categories": categories,
+            "explanation": explanation,
             "judge_model": self._llm.model,
-            "threshold": self.config.hallucination_threshold,
         }
-        
-        if hallucinations and self.config.include_details:
-            details["hallucinations"] = hallucinations
-        
+
         if parsed.get("parse_error"):
             details["parse_error"] = True
-        
+
         return EvalResult(
             status=EvalStatus.PASSED if passed else EvalStatus.FAILED,
             score=score,
