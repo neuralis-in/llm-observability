@@ -94,6 +94,7 @@ __all__ = [
     "LatencyConsistencyConfig",
     "PIIDetectionConfig",
     "PIIType",
+    "ToxicityDetectionConfig",
     "HallucinationDetectionConfig",
     "SQLQueryValidatorConfig",
     # Correctness evaluators
@@ -106,5 +107,6 @@ __all__ = [
     "LatencyConsistencyEval",
     # Safety evaluators
     "PIIDetectionEval",
+    "ToxicityDetectionEval",
 ]
 
