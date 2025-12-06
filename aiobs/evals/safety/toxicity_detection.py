@@ -72,3 +72,15 @@ class ToxicityDetectionEval(BaseEval):
         """
         super().__init__(config)
         self.config: ToxicityDetectionConfig = self.config
+        
+        # Create LLM adapter from client
+        self._llm: BaseLLM = LLM.from_client(
+            client=client,
+            model=model,
+            temperature=temperature or self.config.temperature,
+            max_tokens=max_tokens,
+        )
+        
+        # Store model name for logging
+        if self.config.model is None:
+            self.config.model = model
