@@ -559,6 +559,70 @@ class TestExporterIntegration:
         assert call_count[0] == 2
         assert result.success is True
 
+    def test_flush_with_persist_false_no_file(self, tmp_path):
+        """Test that flush with persist=False does not create a file."""
+        import os
+
+        observer.observe("persist-false-exporter")
+
+        # Record a synthetic event
+        ev = ObsEvent(
+            provider="test",
+            api="test.call",
+            request={"input": "hello"},
+            response={"output": "world"},
+            error=None,
+            started_at=0.0,
+            ended_at=1.0,
+            duration_ms=1000.0,
+        )
+        observer._record_event(ev)
+        observer.end()
+
+        # Flush with persist=False
+        out_path = tmp_path / "should_not_exist.json"
+        result = observer.flush(path=str(out_path), persist=False)
+
+        # File should NOT be created
+        assert not os.path.exists(out_path)
+        assert result is None
+
+    def test_flush_with_exporter_and_persist_false(self, tmp_path):
+        """Test that exporter still works when persist=False is set."""
+        import os
+
+        exported_data = []
+
+        def handler(data, options):
+            exported_data.append(data)
+            return ExportResult(success=True, destination="test://exported")
+
+        exporter = CustomExporter(handler=handler)
+
+        observer.observe("exporter-persist-false")
+
+        ev = ObsEvent(
+            provider="test",
+            api="test.call",
+            request={"input": "data"},
+            response={"output": "result"},
+            error=None,
+            started_at=0.0,
+            ended_at=1.0,
+            duration_ms=1000.0,
+        )
+        observer._record_event(ev)
+        observer.end()
+
+        # Flush with exporter (persist is ignored when exporter is provided)
+        out_path = tmp_path / "with_exporter.json"
+        result = observer.flush(path=str(out_path), exporter=exporter, persist=False)
+
+        # Exporter should have been called
+        assert len(exported_data) == 1
+        assert result.success is True
+        assert result.destination == "test://exported"
+
 
 # =============================================================================
 # Helper Functions

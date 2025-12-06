@@ -29,9 +29,21 @@ def test_observer_flush_json_structure(tmp_path):
     assert os.path.exists(written)
 
     data = json.loads(out_path.read_text())
-    assert set(data.keys()) == {"sessions", "events", "function_events", "trace_tree", "enh_prompt_traces", "generated_at", "version"}
-    assert isinstance(data["sessions"], list) and data["sessions"], "sessions should not be empty"
-    assert isinstance(data["events"], list) and data["events"], "events should not be empty"
+    assert set(data.keys()) == {
+        "sessions",
+        "events",
+        "function_events",
+        "trace_tree",
+        "enh_prompt_traces",
+        "generated_at",
+        "version",
+    }
+    assert (
+        isinstance(data["sessions"], list) and data["sessions"]
+    ), "sessions should not be empty"
+    assert (
+        isinstance(data["events"], list) and data["events"]
+    ), "events should not be empty"
     e = data["events"][0]
     for key in [
         "provider",
@@ -104,3 +116,52 @@ def test_observer_flush_with_trace_tree(tmp_path):
     assert "children" in root
     assert len(root["children"]) == 1  # One child: child_func
     assert root["children"][0]["name"] == "child_func"
+
+
+def test_observer_flush_with_persist_false(tmp_path):
+    """Test that flush with persist=False does NOT create JSON file."""
+    observer.observe("persist-false-test")
+
+    # Record a minimal event
+    ev = ObsEvent(
+        provider="test",
+        api="test.call",
+        request={"input": "test"},
+        response={"output": "result"},
+        error=None,
+        started_at=0.0,
+        ended_at=1.0,
+        duration_ms=1000.0,
+    )
+    observer._record_event(ev)
+    observer.end()
+
+    out_path = tmp_path / "persist_false.json"
+    result = observer.flush(str(out_path), persist=False)
+
+    # File should NOT be created
+    assert not os.path.exists(out_path)
+    assert result is None
+
+
+def test_observer_flush_persist_false_with_decorated_functions(tmp_path):
+    """Test that persist=False works correctly with decorated functions."""
+
+    @observe
+    def test_function():
+        return "test_result"
+
+    observer.observe("persist-false-decorated")
+    test_function()
+    observer.end()
+
+    out_path = tmp_path / "decorated_persist_false.json"
+    result = observer.flush(str(out_path), persist=False)
+
+    # File should NOT be created
+    assert not os.path.exists(out_path)
+    assert result is None
+
+    # Verify that data was collected but not persisted
+    assert len(observer._sessions) == 0
+    assert len(observer._events) == 0
