@@ -32,6 +32,18 @@ jobs:
           git config user.name "Cursor Agent"
           git config user.email "cursoragent@cursor.com"
 
+      - name: Verify Cursor API Key
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: |
+          if [ -z "$CURSOR_API_KEY" ]; then
+            echo "❌ CURSOR_API_KEY is not set or empty!"
+            echo "Please ensure you have added the secret 'CURSOR_API_KEY' in repository settings."
+            exit 1
+          else
+            echo "✅ CURSOR_API_KEY is set (length: ${#CURSOR_API_KEY} characters)"
+          fi
+
       - name: Perform automated code review
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
