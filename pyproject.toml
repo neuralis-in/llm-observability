@@ -35,6 +35,9 @@ openai = [
 gemini = [
   "google-genai>=1.0.0",
 ]
+sql = [
+  "sqlglot>=20.0.0",
+]
 example = [
   "python-dotenv>=1.0",
 ]

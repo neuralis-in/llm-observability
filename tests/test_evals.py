@@ -20,6 +20,7 @@ from aiobs.evals import (
     PIIDetectionConfig,
     PIIType,
     HallucinationDetectionConfig,
+    SQLQueryValidatorConfig,
     # Evaluators
     RegexAssertion,
     SchemaAssertion,
@@ -27,6 +28,7 @@ from aiobs.evals import (
     LatencyConsistencyEval,
     PIIDetectionEval,
     HallucinationDetectionEval,
+    SQLQueryValidator,
 )
 from aiobs.llm import LLM, BaseLLM, LLMResponse
 
@@ -1389,4 +1391,197 @@ class TestEvalsIntegration:
         
         assert "RegexAssertion" in repr_str
         assert "regex_assertion" in repr_str
+
+
+# =============================================================================
+# SQLQueryValidator Tests
+# =============================================================================
+
+
+class TestSQLQueryValidator:
+    """Tests for SQLQueryValidator evaluator."""
+
+    def test_valid_basic_select(self):
+        """Test valid basic SELECT query."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator
+        
+        evaluator = SQLQueryValidator()
+        result = evaluator(EvalInput(
+            user_input="Get all users",
+            model_output="SELECT * FROM users",
+        ))
+        assert result.passed
+        assert result.score == 1.0
+        assert "valid" in result.message.lower()
+
+    def test_valid_complex_query(self):
+        """Test valid complex query with joins and aggregates."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator
+        
+        evaluator = SQLQueryValidator()
+        result = evaluator(EvalInput(
+            user_input="Get user order counts",
+            model_output="""
+                SELECT u.id, u.name, COUNT(o.id) as order_count
+                FROM users u
+                LEFT JOIN orders o ON u.id = o.user_id
+                GROUP BY u.id, u.name
+            """,
+        ))
+        assert result.passed
+
+    def test_invalid_sql_syntax(self):
+        """Test invalid SQL syntax fails."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator
+        
+        evaluator = SQLQueryValidator()
+        result = evaluator(EvalInput(
+            user_input="Get all users",
+            model_output="SELECT FROM WHERE",  # Invalid structure
+        ))
+        assert result.failed
+        assert result.score == 0.0
+        assert "invalid" in result.message.lower()
+
+    def test_incomplete_query(self):
+        """Test incomplete query fails."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator
+        
+        evaluator = SQLQueryValidator()
+        result = evaluator(EvalInput(
+            user_input="Get users",
+            model_output="SELECT * FROM",  # Incomplete
+        ))
+        assert result.failed
+
+    def test_dialect_validation(self):
+        """Test dialect-specific SQL validation."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator, SQLQueryValidatorConfig
+        
+        # Test PostgreSQL-specific syntax (INTERVAL)
+        config = SQLQueryValidatorConfig(dialect="postgres")
+        evaluator = SQLQueryValidator(config)
+        
+        result = evaluator(EvalInput(
+            user_input="Get recent users",
+            model_output="SELECT * FROM users WHERE created_at > NOW() - INTERVAL '7 days'",
+        ))
+        assert result.passed
+        assert "postgres" in result.message.lower()
+
+    def test_no_dialect_default(self):
+        """Test validation without specific dialect."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator
+        
+        evaluator = SQLQueryValidator()
+        result = evaluator(EvalInput(
+            user_input="Get users",
+            model_output="SELECT * FROM users WHERE id > 100",
+        ))
+        assert result.passed
+        assert "dialect" not in result.message.lower()
+
+    def test_empty_query(self):
+        """Test that empty query fails gracefully."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator
+        
+        evaluator = SQLQueryValidator()
+        result = evaluator(EvalInput(
+            user_input="Query?",
+            model_output="   ",  # Only whitespace
+        ))
+        assert result.failed
+
+    def test_whitespace_handling(self):
+        """Test query with extra whitespace."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator
+        
+        evaluator = SQLQueryValidator()
+        result = evaluator(EvalInput(
+            user_input="Get users",
+            model_output="  \n  SELECT   *   FROM   users  \n  ",
+        ))
+        assert result.passed
+
+    def test_assertion_details(self):
+        """Test that assertions contain proper details."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator
+        
+        evaluator = SQLQueryValidator()
+        result = evaluator(EvalInput(
+            user_input="Get users",
+            model_output="SELECT * FROM users",
+        ))
+        
+        assert len(result.assertions) == 1
+        assertion = result.assertions[0]
+        assert assertion.name == "sql_parse"
+        assert assertion.passed is True
+        assert "valid" in assertion.message.lower()
+
+    def test_error_assertion_details(self):
+        """Test assertion details on error."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator
+        
+        evaluator = SQLQueryValidator()
+        result = evaluator(EvalInput(
+            user_input="Get users",
+            model_output="INVALID SQL QUERY",
+        ))
+        
+        assert len(result.assertions) == 1
+        assertion = result.assertions[0]
+        assert assertion.name == "sql_parse"
+        assert assertion.passed is False
+        assert assertion.message  # Error message present
+
+    def test_is_available_method(self):
+        """Test is_available class method."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator
+        
+        # Should return True when sqlglot is installed
+        assert SQLQueryValidator.is_available() is True
+
+    def test_custom_eval_name(self):
+        """Test custom eval name via config."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator, SQLQueryValidatorConfig
+        
+        config = SQLQueryValidatorConfig(name="my_sql_validator")
+        evaluator = SQLQueryValidator(config)
+        result = evaluator(EvalInput(
+            user_input="Get users",
+            model_output="SELECT * FROM users",
+        ))
+        
+        assert result.eval_name == "my_sql_validator"
+
+    def test_long_output_truncation(self):
+        """Test that long outputs are truncated in error messages."""
+        pytest.importorskip("sqlglot")
+        from aiobs.evals import SQLQueryValidator
+        
+        evaluator = SQLQueryValidator()
+        long_invalid_sql = "INVALID " * 50  # Create a long invalid string
+        
+        result = evaluator(EvalInput(
+            user_input="Get users",
+            model_output=long_invalid_sql,
+        ))
+        
+        assert result.failed
+        # Check that the actual output in assertion is truncated
+        assertion = result.assertions[0]
+        assert len(assertion.actual) <= 103  # 100 chars + "..."
 

@@ -14,6 +14,7 @@ from .configs import (
     PIIDetectionConfig,
     PIIType,
     HallucinationDetectionConfig,
+    SQLQueryValidatorConfig,
 )
 
 __all__ = [
@@ -32,5 +33,6 @@ __all__ = [
     "PIIDetectionConfig",
     "PIIType",
     "HallucinationDetectionConfig",
+    "SQLQueryValidatorConfig",
 ]
 

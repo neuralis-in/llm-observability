@@ -249,3 +249,18 @@ class HallucinationDetectionConfig(BaseEvalConfig):
         description="Maximum number of claims to extract and evaluate"
     )
 
+
+class SQLQueryValidatorConfig(BaseEvalConfig):
+    """Configuration for SQL query validation evaluator.
+    
+    Validates that model output is a syntactically correct SQL query
+    using sqlglot. Supports multiple SQL dialects for dialect-specific
+    validation.
+    """
+    
+    dialect: Optional[str] = Field(
+        default=None,
+        description="SQL dialect for parsing (postgres, mysql, sqlite, etc.). "
+                    "If None, uses default sqlglot parsing."
+    )
+

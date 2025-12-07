@@ -52,6 +52,7 @@ from .models import (
     PIIDetectionConfig,
     PIIType,
     HallucinationDetectionConfig,
+    SQLQueryValidatorConfig,
 )
 
 # Correctness evaluators
@@ -60,6 +61,7 @@ from .correctness import (
     SchemaAssertion,
     GroundTruthEval,
     HallucinationDetectionEval,
+    SQLQueryValidator,
 )
 
 # Reliability evaluators
@@ -90,11 +92,13 @@ __all__ = [
     "PIIDetectionConfig",
     "PIIType",
     "HallucinationDetectionConfig",
+    "SQLQueryValidatorConfig",
     # Correctness evaluators
     "RegexAssertion",
     "SchemaAssertion",
     "GroundTruthEval",
     "HallucinationDetectionEval",
+    "SQLQueryValidator",
     # Reliability evaluators
     "LatencyConsistencyEval",
     # Safety evaluators

@@ -233,21 +233,25 @@ class Collector:
         path: Optional[str] = None,
         include_trace_tree: bool = True,
         exporter: Optional["BaseExporter"] = None,
+        persist: bool = True,
         **exporter_kwargs: Any,
-    ) -> Union[str, "ExportResult"]:
+    ) -> Union[str, "ExportResult", None]:
         """Flush all sessions and events to a file or custom exporter.
 
         Args:
             path: Output file path. Defaults to LLM_OBS_OUT env var or '<session-id>.json'.
-                  Ignored if exporter is provided.
+                  Ignored if exporter is provided or persist is False.
             include_trace_tree: Whether to include the nested trace_tree structure. Defaults to True.
             exporter: Optional exporter instance (e.g., GCSExporter, CustomExporter).
                       If provided, data is exported using this exporter instead of writing to a local file.
+            persist: If True, dump observations to <session-id>.json file. If False, skip JSON file creation.
+                     Defaults to True. Ignored if exporter is provided.
             **exporter_kwargs: Additional keyword arguments passed to the exporter's export() method.
 
         Returns:
             If exporter is provided: ExportResult from the exporter.
-            Otherwise: The output file path used.
+            If persist is True: The output file path used.
+            If persist is False: None.
         """
         with self._lock:
             # Separate standard events from function events
@@ -299,24 +303,26 @@ class Collector:
                 self._active_session = None
                 return result
 
-            # Default: write to local file
-            # Determine default filename based on session ID
-            default_filename = "llm_observability.json"
-            if self._active_session:
-                default_filename = f"{self._active_session}.json"
-            elif self._sessions:
-                # Use the first session ID if no active session
-                default_filename = f"{next(iter(self._sessions.keys()))}.json"
-            
-            out_path = path or os.getenv("LLM_OBS_OUT", default_filename)
-            # Ensure directory exists if a nested path
-            out_dir = os.path.dirname(out_path)
-            if out_dir and not os.path.exists(out_dir):
-                os.makedirs(out_dir, exist_ok=True)
+            # Default: write to local file (only if persist=True)
+            out_path = None
+            if persist:
+                # Determine default filename based on session ID
+                default_filename = "llm_observability.json"
+                if self._active_session:
+                    default_filename = f"{self._active_session}.json"
+                elif self._sessions:
+                    # Use the first session ID if no active session
+                    default_filename = f"{next(iter(self._sessions.keys()))}.json"
+                
+                out_path = path or os.getenv("LLM_OBS_OUT", default_filename)
+                # Ensure directory exists if a nested path
+                out_dir = os.path.dirname(out_path)
+                if out_dir and not os.path.exists(out_dir):
+                    os.makedirs(out_dir, exist_ok=True)
 
-            # Write/overwrite JSON file
-            with open(out_path, "w", encoding="utf-8") as f:
-                json.dump(export.model_dump(), f, ensure_ascii=False, indent=2)
+                # Write/overwrite JSON file
+                with open(out_path, "w", encoding="utf-8") as f:
+                    json.dump(export.model_dump(), f, ensure_ascii=False, indent=2)
 
             # Flush traces to remote server
             if self._api_key:
