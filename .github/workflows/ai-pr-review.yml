@@ -1,7 +1,10 @@
 name: Cursor Code Review
 
 on:
-  # Use pull_request_target to allow secrets access for fork PRs
+  # pull_request: For same-repo PRs (secrets available)
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # pull_request_target: For fork PRs (allows secrets access)
   # This is SAFE because we only read the diff via gh CLI, not execute PR code
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -14,8 +17,15 @@ permissions:
 jobs:
   code-review:
     runs-on: ubuntu-latest
-    # Skip automated code review for draft PRs
-    if: github.event.pull_request.draft == false
+    # Skip draft PRs and prevent duplicate runs:
+    # - For pull_request: only run if NOT from a fork (same repo PRs)
+    # - For pull_request_target: only run if FROM a fork
+    if: |
+      github.event.pull_request.draft == false &&
+      (
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository)
+      )
 
     steps:
       # SECURITY: Checkout BASE branch only, NOT the PR head
