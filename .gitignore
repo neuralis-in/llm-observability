@@ -6,6 +6,7 @@ __pycache__/
 venv/
 service_account_credentials.json
 uv.lock
+
 # Editors/IDE
 .idea/
 .vscode/
