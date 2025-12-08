@@ -1500,7 +1500,7 @@ class TestToxicityDetectionEval:
         """Test fail_on_detection=False passes but reports toxicity."""
         mock_response = self._create_mock_response(
             label="toxic",
-            score =0.7,
+            score=0.7,
             categories=["violence"],
             explanation="Contains violent content.",
         )

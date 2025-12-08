@@ -68,13 +68,14 @@ class ToxicityDetectionEval(BaseEval):
         max_tokens: Optional[int] = None,
     ) -> None:
         """Initialize with configuration.
-            Args:
-                client: LLM provider client (OpenAI, Gemini, Anthropic, etc.).
-                model: Model name to use for hallucination detection.
-                config: Optional configuration for evaluation behavior.
-                temperature: Temperature for the judge LLM (overrides config).
-                max_tokens: Maximum tokens for judge response. 
-            """
+        
+        Args:
+            client: LLM provider client (OpenAI, Gemini, Anthropic, etc.).
+            model: Model name to use for toxicity detection.
+            config: Optional configuration for evaluation behavior.
+            temperature: Temperature for the judge LLM (overrides config).
+            max_tokens: Maximum tokens for judge response.
+        """
         super().__init__(config)
         self.config: ToxicityDetectionConfig = self.config
         
@@ -157,61 +158,24 @@ class ToxicityDetectionEval(BaseEval):
 
     
     def _build_prompt(self, eval_input: EvalInput, text: str = None) -> str:
-        """
-        Build the toxicity evaluation prompt.
+        """Build the toxicity evaluation prompt.
 
         Args:
             eval_input: The input to evaluate.
             text: Optional override for the text to evaluate (for checking input separately).
-    
+
         Returns:
             Fully formatted toxicity judge prompt string.
         """
-
         # Use provided text or default to model output
         if text is None:
             text = eval_input.model_output
+        
         # Construct final prompt
-        prompt = TOXICITY_JUDGE_PROMPT.format(
-            text=text,
-        )
+        prompt = TOXICITY_JUDGE_PROMPT.format(text=text)
 
         return prompt
 
-
-    
-    def _format_context(self, context: Dict[str, Any]) -> str:
-        """Format context dictionary into a readable string for toxicity evaluation."""
-    
-        parts = []
-
-        # Handle common context keys
-        if "documents" in context:
-            docs = context["documents"]
-            if isinstance(docs, list):
-                for i, doc in enumerate(docs, 1):
-                    parts.append(f"Document {i}:\n{doc}")
-            else:
-                parts.append(f"Documents:\n{docs}")
-
-        if "sources" in context:
-            sources = context["sources"]
-            if isinstance(sources, list):
-                for i, src in enumerate(sources, 1):
-                    parts.append(f"Source {i}:\n{src}")
-            else:
-                parts.append(f"Sources:\n{sources}")
-
-        # Handle any other keys
-        for key, value in context.items():
-            if key not in ("documents", "sources"):
-                if isinstance(value, (list, dict)):
-                    parts.append(f"{key}:\n{json.dumps(value, indent=2)}")
-                else:
-                    parts.append(f"{key}:\n{value}")
-
-        return "\n\n".join(parts)
-    
     def _parse_response(self, response_text: str) -> Dict[str, Any]:
         """Parse the judge LLM's toxicity response."""
         
@@ -420,3 +384,4 @@ class ToxicityDetectionEval(BaseEval):
             assertions=assertions if self.config.include_details else None,
             details=details if self.config.include_details else None,
         )
+
