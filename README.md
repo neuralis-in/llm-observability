@@ -1,5 +1,4 @@
 # aiobs
-
 [![PyPI](https://img.shields.io/pypi/v/aiobs)](https://pypi.org/project/aiobs/) [![aiobs-chat](https://img.shields.io/badge/zulip-join_chat-brightgreen.svg)](https://aiobs.zulipchat.com/)
 
 `aiobs` is a lightweight Python library that adds **observability** to AI/LLM applications. Trace every call, capture inputs/outputs, measure latency, and debug failures—with just 3 lines of code. Built-in support for OpenAI and Google Gemini.
@@ -256,7 +255,6 @@ observer.flush()
 ```
 
 Captured JSON output will include:
-
 - `enh_prompt_id`: Unique identifier for each enhanced prompt trace
 - `auto_enhance_after`: Configured threshold for auto-enhancement
 - `enh_prompt_traces`: List of all `enh_prompt_id` values for easy lookup across multiple JSON files
@@ -264,13 +262,11 @@ Captured JSON output will include:
 ## Run the Examples
 
 - Simple OpenAI example:
-
   ```bash
   python example/simple-chat-completion/chat.py
   ```
 
 - Gemini example:
-
   ```bash
   python example/gemini/main.py
   ```
@@ -334,7 +330,9 @@ Captured JSON output will include:
       "api": "chat.completions.create",
       "request": {
         "model": "gpt-4o-mini",
-        "messages": [{ "role": "user", "content": "What is observability?" }]
+        "messages": [
+          {"role": "user", "content": "What is observability?"}
+        ]
       },
       "response": {
         "text": "Observability is the ability to understand...",
@@ -365,7 +363,7 @@ Captured JSON output will include:
       "args": ["What is an API?"],
       "kwargs": {},
       "result": ["result1", "result2"],
-      "started_at": 1733135400.1,
+      "started_at": 1733135400.100,
       "ended_at": 1733135400.113,
       "duration_ms": 13,
       "callsite": {
@@ -378,7 +376,6 @@ Captured JSON output will include:
   "version": 1
 }
 ```
-
 </details>
 
 ## Data Models
@@ -423,7 +420,6 @@ class MyProvider(BaseProvider):
         def unpatch():
             pass
         return unpatch
-
 # Register before observe()
 observer.register_provider(MyProvider())
 observer.observe()
