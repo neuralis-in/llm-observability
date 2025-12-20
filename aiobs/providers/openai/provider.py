@@ -1,51 +1,51 @@
+"""OpenAI provider using OpenTelemetry instrumentation.
+
+This provider uses the official OpenTelemetry OpenAI instrumentation
+(opentelemetry-instrumentation-openai-v2) to automatically trace OpenAI API calls.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Optional
 
 from ..base import BaseProvider
-from .apis.base_api import BaseOpenAIAPIModule
-from .apis.chat_completions import ChatCompletionsAPI
-from .apis.embeddings import EmbeddingsAPI
 
 
 class OpenAIProvider(BaseProvider):
+    """OpenAI provider using OTel instrumentation.
+    
+    This provider delegates to the official OpenTelemetry OpenAI instrumentor.
+    The actual instrumentation is installed by the Collector, but this class
+    provides backward compatibility for users who explicitly register providers.
+    """
+    
     name = "openai"
-
-    def __init__(self) -> None:
-        self._modules: List[BaseOpenAIAPIModule] = []
 
     @classmethod
     def is_available(cls) -> bool:
-        # Available if any sub-module is available
+        """Check if OpenAI OTel instrumentation is available."""
         try:
-            return ChatCompletionsAPI.is_available() or EmbeddingsAPI.is_available()
-        except Exception:
+            from opentelemetry.instrumentation.openai_v2 import OpenAIInstrumentor  # noqa: F401
+            return True
+        except ImportError:
             return False
 
     def install(self, collector: Any) -> Optional[Callable[[], None]]:
-        unpatchers: List[Callable[[], None]] = []
-
-        # Build module list (extensible: append additional APIs here)
-        modules: List[BaseOpenAIAPIModule] = []
-        if ChatCompletionsAPI.is_available():
-            modules.append(ChatCompletionsAPI())
-        if EmbeddingsAPI.is_available():
-            modules.append(EmbeddingsAPI())
-
-        for mod in modules:
-            try:
-                up = mod.install(collector)
-                if up:
-                    unpatchers.append(up)
-                self._modules.append(mod)
-            except Exception:
-                continue
-
-        def unpatch_all() -> None:
-            for up in reversed(unpatchers):
-                try:
-                    up()
-                except Exception:
-                    pass
-
-        return unpatch_all if unpatchers else None
+        """Install OpenAI OTel instrumentation.
+        
+        Note: The Collector already installs this automatically.
+        This method is kept for backward compatibility.
+        """
+        try:
+            from opentelemetry.instrumentation.openai_v2 import OpenAIInstrumentor
+            
+            instrumentor = OpenAIInstrumentor()
+            if not instrumentor.is_instrumented_by_opentelemetry:
+                instrumentor.instrument()
+                return lambda: OpenAIInstrumentor().uninstrument()
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        
+        return None

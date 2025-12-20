@@ -37,6 +37,7 @@ class Event(BaseModel):
     callsite: Optional[Callsite] = Field(default=None)
     span_id: Optional[str] = Field(default=None)
     parent_span_id: Optional[str] = Field(default=None)
+    trace_id: Optional[str] = Field(default=None)  # OTel trace ID for correlation
 
 
 class FunctionEvent(BaseModel):
@@ -55,6 +56,7 @@ class FunctionEvent(BaseModel):
     callsite: Optional[Callsite] = Field(default=None)
     span_id: Optional[str] = Field(default=None)
     parent_span_id: Optional[str] = Field(default=None)
+    trace_id: Optional[str] = Field(default=None)  # OTel trace ID for correlation
     enh_prompt: bool = Field(default=False)
     enh_prompt_id: Optional[str] = Field(default=None)  # Unique ID for enh_prompt traces
     auto_enhance_after: Optional[int] = Field(default=None)  # Number of traces after which to run auto prompt enhancer

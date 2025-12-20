@@ -15,18 +15,25 @@ import pytest
 def reset_observer_state():
     # Fresh collector state for each test
     from aiobs import observer
+    from aiobs.tracer import clear_spans, clear_logs
 
     observer.reset()
+    clear_spans()
+    clear_logs()
     try:
         yield
     finally:
         observer.reset()
+        clear_spans()
+        clear_logs()
 
 
 @pytest.fixture(autouse=True)
 def set_test_api_key(monkeypatch):
     """Set a test API key for all tests."""
     monkeypatch.setenv("AIOBS_API_KEY", "aiobs_sk_test_key_for_testing")
+    # Enable GenAI message content capture for OTel instrumentors
+    monkeypatch.setenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "true")
 
 
 @pytest.fixture(autouse=True)

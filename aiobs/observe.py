@@ -1,4 +1,4 @@
-"""@observe decorator for tracing function execution."""
+"""@observe decorator for tracing function execution using OpenTelemetry."""
 
 from __future__ import annotations
 
@@ -63,6 +63,32 @@ def _safe_repr(obj: Any, max_length: int = 500) -> Any:
         return f"<{type(obj).__name__}>"
 
 
+def _get_span_ids_from_otel_span(span: Any) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Extract span_id, parent_span_id, and trace_id from an OTel span.
+    
+    Returns:
+        Tuple of (span_id, parent_span_id, trace_id)
+    """
+    span_id = None
+    parent_span_id = None
+    trace_id = None
+    
+    try:
+        span_ctx = span.get_span_context()
+        if span_ctx and span_ctx.is_valid:
+            span_id = format(span_ctx.span_id, '016x')
+            trace_id = format(span_ctx.trace_id, '032x')
+        
+        # Get parent span ID
+        parent = getattr(span, 'parent', None)
+        if parent:
+            parent_span_id = format(parent.span_id, '016x')
+    except Exception:
+        pass
+    
+    return span_id, parent_span_id, trace_id
+
+
 @overload
 def observe(func: F) -> F: ...
 
@@ -88,7 +114,7 @@ def observe(
     auto_enhance_after: Optional[int] = None,
 ) -> Union[F, Callable[[F], F]]:
     """
-    Decorator to trace function execution.
+    Decorator to trace function execution using OpenTelemetry.
 
     Can be used with or without arguments:
         @observe
@@ -128,14 +154,15 @@ def observe(
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 # Import here to avoid circular imports
                 from . import observer
-
-                # Generate unique span ID and get parent from context
-                span_id = str(uuid.uuid4())
-                parent_span_id = observer.get_current_span_id()
-
-                # Set this span as current for nested calls
-                token = observer.set_current_span_id(span_id)
-
+                from .tracer import get_tracer, is_initialized
+                
+                # Initialize tracer if not already done
+                if not is_initialized():
+                    from .tracer import init_tracer
+                    init_tracer()
+                
+                tracer = get_tracer()
+                
                 started = time.time()
                 callsite = _get_callsite(skip_frames=2)
                 error_msg: Optional[str] = None
@@ -151,49 +178,59 @@ def observe(
                     except Exception:
                         pass
 
-                try:
-                    result = await fn(*args, **kwargs)
-                    return result
-                except Exception as e:
-                    error_msg = f"{type(e).__name__}: {e}"
-                    raise
-                finally:
-                    ended = time.time()
+                # Use OTel span for tracing
+                with tracer.start_as_current_span(fn_name) as span:
+                    # Get span IDs from OTel
+                    span_id, parent_span_id, trace_id = _get_span_ids_from_otel_span(span)
+                    
+                    # Fallback if OTel span IDs not available
+                    if not span_id:
+                        span_id = str(uuid.uuid4())
+                        parent_span_id = observer.get_current_span_id()
+                    
+                    try:
+                        result = await fn(*args, **kwargs)
+                        return result
+                    except Exception as e:
+                        error_msg = f"{type(e).__name__}: {e}"
+                        # Record exception on OTel span
+                        span.record_exception(e)
+                        raise
+                    finally:
+                        ended = time.time()
 
-                    # Capture result if enabled
-                    captured_result = None
-                    if capture_result and error_msg is None:
-                        try:
-                            captured_result = _safe_repr(result)
-                        except Exception:
-                            pass
+                        # Capture result if enabled
+                        captured_result = None
+                        if capture_result and error_msg is None:
+                            try:
+                                captured_result = _safe_repr(result)
+                            except Exception:
+                                pass
 
-                    # Generate enh_prompt_id if enh_prompt is enabled
-                    enh_prompt_id = str(uuid.uuid4()) if enh_prompt else None
+                        # Generate enh_prompt_id if enh_prompt is enabled
+                        enh_prompt_id = str(uuid.uuid4()) if enh_prompt else None
 
-                    event = FunctionEvent(
-                        provider="function",
-                        api=f"{fn_module}.{fn_qualname}" if fn_module else fn_qualname,
-                        name=fn_name,
-                        module=fn_module,
-                        args=captured_args,
-                        kwargs=captured_kwargs,
-                        result=captured_result,
-                        error=error_msg,
-                        started_at=started,
-                        ended_at=ended,
-                        duration_ms=round((ended - started) * 1000, 3),
-                        callsite=callsite,
-                        span_id=span_id,
-                        parent_span_id=parent_span_id,
-                        enh_prompt=enh_prompt,
-                        enh_prompt_id=enh_prompt_id,
-                        auto_enhance_after=auto_enhance_after,
-                    )
-                    observer._record_event(event)
-
-                    # Restore previous span context
-                    observer.reset_span_id(token)
+                        event = FunctionEvent(
+                            provider="function",
+                            api=f"{fn_module}.{fn_qualname}" if fn_module else fn_qualname,
+                            name=fn_name,
+                            module=fn_module,
+                            args=captured_args,
+                            kwargs=captured_kwargs,
+                            result=captured_result,
+                            error=error_msg,
+                            started_at=started,
+                            ended_at=ended,
+                            duration_ms=round((ended - started) * 1000, 3),
+                            callsite=callsite,
+                            span_id=span_id,
+                            parent_span_id=parent_span_id,
+                            trace_id=trace_id,
+                            enh_prompt=enh_prompt,
+                            enh_prompt_id=enh_prompt_id,
+                            auto_enhance_after=auto_enhance_after,
+                        )
+                        observer._record_event(event)
 
             return async_wrapper  # type: ignore[return-value]
 
@@ -202,14 +239,15 @@ def observe(
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
                 # Import here to avoid circular imports
                 from . import observer
-
-                # Generate unique span ID and get parent from context
-                span_id = str(uuid.uuid4())
-                parent_span_id = observer.get_current_span_id()
-
-                # Set this span as current for nested calls
-                token = observer.set_current_span_id(span_id)
-
+                from .tracer import get_tracer, is_initialized
+                
+                # Initialize tracer if not already done
+                if not is_initialized():
+                    from .tracer import init_tracer
+                    init_tracer()
+                
+                tracer = get_tracer()
+                
                 started = time.time()
                 callsite = _get_callsite(skip_frames=2)
                 error_msg: Optional[str] = None
@@ -225,49 +263,59 @@ def observe(
                     except Exception:
                         pass
 
-                try:
-                    result = fn(*args, **kwargs)
-                    return result
-                except Exception as e:
-                    error_msg = f"{type(e).__name__}: {e}"
-                    raise
-                finally:
-                    ended = time.time()
+                # Use OTel span for tracing
+                with tracer.start_as_current_span(fn_name) as span:
+                    # Get span IDs from OTel
+                    span_id, parent_span_id, trace_id = _get_span_ids_from_otel_span(span)
+                    
+                    # Fallback if OTel span IDs not available
+                    if not span_id:
+                        span_id = str(uuid.uuid4())
+                        parent_span_id = observer.get_current_span_id()
+                    
+                    try:
+                        result = fn(*args, **kwargs)
+                        return result
+                    except Exception as e:
+                        error_msg = f"{type(e).__name__}: {e}"
+                        # Record exception on OTel span
+                        span.record_exception(e)
+                        raise
+                    finally:
+                        ended = time.time()
 
-                    # Capture result if enabled
-                    captured_result = None
-                    if capture_result and error_msg is None:
-                        try:
-                            captured_result = _safe_repr(result)
-                        except Exception:
-                            pass
+                        # Capture result if enabled
+                        captured_result = None
+                        if capture_result and error_msg is None:
+                            try:
+                                captured_result = _safe_repr(result)
+                            except Exception:
+                                pass
 
-                    # Generate enh_prompt_id if enh_prompt is enabled
-                    enh_prompt_id = str(uuid.uuid4()) if enh_prompt else None
+                        # Generate enh_prompt_id if enh_prompt is enabled
+                        enh_prompt_id = str(uuid.uuid4()) if enh_prompt else None
 
-                    event = FunctionEvent(
-                        provider="function",
-                        api=f"{fn_module}.{fn_qualname}" if fn_module else fn_qualname,
-                        name=fn_name,
-                        module=fn_module,
-                        args=captured_args,
-                        kwargs=captured_kwargs,
-                        result=captured_result,
-                        error=error_msg,
-                        started_at=started,
-                        ended_at=ended,
-                        duration_ms=round((ended - started) * 1000, 3),
-                        callsite=callsite,
-                        span_id=span_id,
-                        parent_span_id=parent_span_id,
-                        enh_prompt=enh_prompt,
-                        enh_prompt_id=enh_prompt_id,
-                        auto_enhance_after=auto_enhance_after,
-                    )
-                    observer._record_event(event)
-
-                    # Restore previous span context
-                    observer.reset_span_id(token)
+                        event = FunctionEvent(
+                            provider="function",
+                            api=f"{fn_module}.{fn_qualname}" if fn_module else fn_qualname,
+                            name=fn_name,
+                            module=fn_module,
+                            args=captured_args,
+                            kwargs=captured_kwargs,
+                            result=captured_result,
+                            error=error_msg,
+                            started_at=started,
+                            ended_at=ended,
+                            duration_ms=round((ended - started) * 1000, 3),
+                            callsite=callsite,
+                            span_id=span_id,
+                            parent_span_id=parent_span_id,
+                            trace_id=trace_id,
+                            enh_prompt=enh_prompt,
+                            enh_prompt_id=enh_prompt_id,
+                            auto_enhance_after=auto_enhance_after,
+                        )
+                        observer._record_event(event)
 
             return sync_wrapper  # type: ignore[return-value]
 
@@ -275,4 +323,3 @@ def observe(
     if func is not None:
         return decorator(func)
     return decorator
-

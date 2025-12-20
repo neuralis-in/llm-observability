@@ -1,4 +1,4 @@
-"""Minimal LLM observability SDK.
+"""Minimal LLM observability SDK with OpenTelemetry underneath.
 
 Usage (global singleton):
 
@@ -8,9 +8,10 @@ Usage (global singleton):
     observer.end()      # end current session
     observer.flush()    # write a single JSON file to disk
 
-Supported providers:
-    - OpenAI (chat.completions)
+Supported providers (via OpenTelemetry instrumentation):
+    - OpenAI (chat.completions, embeddings)
     - Google Gemini (models.generate_content)
+    - Vertex AI
 
 Function tracing with @observe decorator:
 
@@ -38,6 +39,14 @@ Export to cloud storage or custom destinations:
     # ... your agent code ...
     observer.end()
     observer.flush(exporter=exporter)
+
+OpenTelemetry Integration:
+    This SDK uses OpenTelemetry underneath for trace context propagation and
+    provider instrumentation. Install the appropriate OTel instrumentors:
+    
+    pip install aiobs[openai]   # For OpenAI support
+    pip install aiobs[gemini]   # For Gemini support
+    pip install aiobs[all]      # For all providers
 """
 
 from .collector import Collector

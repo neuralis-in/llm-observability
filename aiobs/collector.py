@@ -23,6 +23,7 @@ from .models import (
 
 if TYPE_CHECKING:
     from .exporters.base import BaseExporter, ExportResult
+    from opentelemetry.sdk.trace import ReadableSpan
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ SHEPHERD_SERVER_URL = "https://shepherd-api-48963996968.us-central1.run.app"
 # Default flush server URL for trace storage
 AIOBS_FLUSH_SERVER_URL = "https://aiobs-flush-server-48963996968.us-central1.run.app"
 
-# Context variable to track current span for nested tracing
+# Context variable to track current span for nested tracing (fallback for non-OTel spans)
 _current_span_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "_current_span_id", default=None
 )
@@ -138,12 +139,15 @@ def _get_system_labels() -> Dict[str, str]:
 
 
 class Collector:
-    """Simple, global-style collector with pluggable provider instrumentation.
+    """Simple, global-style collector with OpenTelemetry-based instrumentation.
 
     API:
       - observe(): enable instrumentation and start a session
       - end(): finish current session
       - flush(): write captured data to JSON (default: ./<session-id>.json)
+      
+    This collector uses OpenTelemetry underneath for trace context propagation
+    and provider instrumentation, while maintaining the same output format.
     """
 
     def __init__(self) -> None:
@@ -153,7 +157,6 @@ class Collector:
         self._lock = threading.RLock()
         self._instrumented = False
         self._unpatchers: List[Callable[[], None]] = []
-        self._providers: List[Any] = []  # instances of BaseProvider
         self._api_key: Optional[str] = None
 
     # Public API
@@ -254,6 +257,9 @@ class Collector:
             If persist is False: None.
         """
         with self._lock:
+            # Collect OTel spans and convert to events
+            self._collect_otel_spans()
+            
             # Separate standard events from function events
             standard_events = []
             function_events = []
@@ -456,38 +462,49 @@ class Collector:
 
     # Internal API
     def _install_instrumentation(self) -> None:
-        # If no providers explicitly registered, attempt to include built-ins
-        if not self._providers:
-            try:
-                from .providers.openai import OpenAIProvider  # lazy import
-
-                if OpenAIProvider.is_available():
-                    self._providers.append(OpenAIProvider())
-            except Exception:
-                pass
-
-            try:
-                from .providers.gemini import GeminiProvider  # lazy import
-
-                if GeminiProvider.is_available():
-                    self._providers.append(GeminiProvider())
-            except Exception:
-                pass
-
-        # Install each provider's instrumentation
-        for provider in list(self._providers):
-            try:
-                unpatch = provider.install(self)
-                if unpatch:
-                    self._unpatchers.append(unpatch)
-            except Exception:
-                # Non-fatal
-                continue
-
-    # Optional: allow external registration of providers
-    def register_provider(self, provider: Any) -> None:
-        with self._lock:
-            self._providers.append(provider)
+        """Install OpenTelemetry tracer and provider instrumentors."""
+        # Initialize OTel tracer
+        from .tracer import init_tracer
+        init_tracer()
+        
+        # Install OpenAI instrumentor (if available)
+        try:
+            from opentelemetry.instrumentation.openai_v2 import OpenAIInstrumentor
+            instrumentor = OpenAIInstrumentor()
+            if not instrumentor.is_instrumented_by_opentelemetry:
+                instrumentor.instrument()
+                self._unpatchers.append(lambda: OpenAIInstrumentor().uninstrument())
+                logger.debug("OpenAI OTel instrumentation installed")
+        except ImportError:
+            logger.debug("OpenAI OTel instrumentation not available")
+        except Exception as e:
+            logger.debug(f"Failed to install OpenAI OTel instrumentation: {e}")
+        
+        # Install Google GenAI instrumentor (for google-genai SDK)
+        try:
+            from opentelemetry.instrumentation.google_genai import GoogleGenAiSdkInstrumentor
+            instrumentor = GoogleGenAiSdkInstrumentor()
+            if not instrumentor.is_instrumented_by_opentelemetry:
+                instrumentor.instrument()
+                self._unpatchers.append(lambda: GoogleGenAiSdkInstrumentor().uninstrument())
+                logger.debug("Google GenAI OTel instrumentation installed")
+        except ImportError:
+            logger.debug("Google GenAI OTel instrumentation not available")
+        except Exception as e:
+            logger.debug(f"Failed to install Google GenAI OTel instrumentation: {e}")
+        
+        # Install Vertex AI instrumentor (for langchain/vertex)
+        try:
+            from opentelemetry.instrumentation.vertexai import VertexAIInstrumentor
+            instrumentor = VertexAIInstrumentor()
+            if not instrumentor.is_instrumented_by_opentelemetry:
+                instrumentor.instrument()
+                self._unpatchers.append(lambda: VertexAIInstrumentor().uninstrument())
+                logger.debug("Vertex AI OTel instrumentation installed")
+        except ImportError:
+            logger.debug("Vertex AI OTel instrumentation not available")
+        except Exception as e:
+            logger.debug(f"Failed to install Vertex AI OTel instrumentation: {e}")
 
     def reset(self) -> None:
         """Reset collector state and unpatch providers (for tests/dev)."""
@@ -498,15 +515,400 @@ class Collector:
             self._events.clear()
             self._api_key = None
 
-            # Unpatch providers
+            # Unpatch instrumentors
             for up in reversed(self._unpatchers):
                 try:
                     up()
                 except Exception:
                     pass
             self._unpatchers.clear()
-            self._providers.clear()
             self._instrumented = False
+            
+            # Reset OTel tracer
+            from .tracer import reset_tracer
+            reset_tracer()
+
+    def _collect_otel_spans(self) -> None:
+        """Collect finished OTel spans and logs, converting them to aiobs events.
+        
+        Note: Spans from the aiobs tracer (created by @observe decorator) are
+        filtered out to avoid duplicates, since those are already recorded
+        directly as FunctionEvents.
+        
+        Logs are associated with spans via their span context and used to
+        extract message content (prompts and completions).
+        """
+        from .tracer import get_finished_spans, clear_spans, get_finished_logs, clear_logs
+        
+        # Get the session to add events to (prefer active, fall back to first available)
+        session_id = self._active_session
+        if not session_id and self._sessions:
+            session_id = next(iter(self._sessions.keys()))
+        
+        if not session_id:
+            # No sessions at all, clear spans/logs and return
+            clear_spans()
+            clear_logs()
+            return
+        
+        # Ensure events list exists for this session
+        if session_id not in self._events:
+            self._events[session_id] = []
+        
+        # Collect logs and group by span_id for message content extraction
+        logs = get_finished_logs()
+        logs_by_span: Dict[str, List] = {}
+        for log in logs:
+            if log.log_record and log.log_record.span_id:
+                span_id = format(log.log_record.span_id, '016x')
+                if span_id not in logs_by_span:
+                    logs_by_span[span_id] = []
+                logs_by_span[span_id].append(log)
+            
+        spans = get_finished_spans()
+        for span in spans:
+            # Skip spans from aiobs tracer (these are @observe decorated functions,
+            # which are already recorded as FunctionEvents)
+            if span.instrumentation_scope and span.instrumentation_scope.name == "aiobs":
+                continue
+            
+            # Get logs associated with this span
+            span_ctx = span.get_span_context()
+            span_id = format(span_ctx.span_id, '016x') if span_ctx else None
+            span_logs = logs_by_span.get(span_id, []) if span_id else []
+            
+            event = self._convert_otel_span_to_event(span, span_logs)
+            if event:
+                self._events[session_id].append(event)
+        
+        # Clear spans and logs after collecting
+        clear_spans()
+        clear_logs()
+
+    def _convert_otel_span_to_event(self, span: "ReadableSpan", logs: Optional[List] = None) -> Optional[ObsEvent]:
+        """Convert an OTel span to aiobs Event model.
+        
+        Extracts data from OTel GenAI semantic conventions to match our output format.
+        Requires OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for full message capture.
+        
+        Args:
+            span: An OpenTelemetry ReadableSpan object.
+            logs: Optional list of LogData objects associated with this span.
+            
+        Returns:
+            An ObsEvent if conversion is successful, None otherwise.
+        """
+        try:
+            attrs = dict(span.attributes) if span.attributes else {}
+            span_name = span.name
+            
+            # Determine provider from attributes (GenAI semantic conventions)
+            provider = str(attrs.get("gen_ai.system", ""))
+            
+            # Normalize provider names
+            if provider in ("vertex_ai", "google_genai", "google"):
+                provider = "gemini"
+            elif not provider:
+                # Try to infer from span name or other attributes
+                if "openai" in span_name.lower() or attrs.get("server.address", "").endswith("openai.com"):
+                    provider = "openai"
+                elif "gemini" in span_name.lower() or "google" in span_name.lower() or "vertex" in span_name.lower():
+                    provider = "gemini"
+                else:
+                    provider = "unknown"
+            
+            # Build full API name (e.g., "chat.completions.create" for OpenAI)
+            operation = str(attrs.get("gen_ai.operation.name", ""))
+            if provider == "openai":
+                if operation == "chat":
+                    api_name = "chat.completions.create"
+                elif operation == "embeddings":
+                    api_name = "embeddings.create"
+                else:
+                    api_name = f"{operation}.create" if operation else span_name
+            elif provider in ("gemini", "google", "google_genai"):
+                # Gemini uses "generate_content" as the operation
+                if operation == "generate_content" or "generate" in span_name.lower():
+                    api_name = "models.generate_content"
+                else:
+                    api_name = operation or span_name
+            else:
+                api_name = operation or span_name
+            
+            # Extract timing (OTel uses nanoseconds)
+            started_at = span.start_time / 1e9 if span.start_time else _now()
+            ended_at = span.end_time / 1e9 if span.end_time else _now()
+            duration_ms = (span.end_time - span.start_time) / 1e6 if span.start_time and span.end_time else 0.0
+            
+            # Extract span IDs
+            span_ctx = span.get_span_context()
+            span_id = format(span_ctx.span_id, '016x') if span_ctx else None
+            trace_id = format(span_ctx.trace_id, '032x') if span_ctx else None
+            
+            parent_span_id = None
+            if span.parent:
+                parent_span_id = format(span.parent.span_id, '016x')
+            
+            # Build request object
+            request_model = attrs.get("gen_ai.request.model")
+            request: Dict[str, Any] = {
+                "model": request_model,
+            }
+            
+            # Add request parameters if available
+            if attrs.get("gen_ai.request.max_tokens"):
+                request["max_tokens"] = attrs.get("gen_ai.request.max_tokens")
+            if attrs.get("gen_ai.request.temperature") is not None:
+                request["temperature"] = attrs.get("gen_ai.request.temperature")
+            if attrs.get("gen_ai.request.top_p") is not None:
+                request["top_p"] = attrs.get("gen_ai.request.top_p")
+            if attrs.get("gen_ai.request.frequency_penalty") is not None:
+                request["frequency_penalty"] = attrs.get("gen_ai.request.frequency_penalty")
+            if attrs.get("gen_ai.request.presence_penalty") is not None:
+                request["presence_penalty"] = attrs.get("gen_ai.request.presence_penalty")
+            
+            # Collect other request attributes
+            other_attrs = {}
+            for key, value in attrs.items():
+                if key.startswith("gen_ai.request.") and key not in [
+                    "gen_ai.request.model", "gen_ai.request.max_tokens",
+                    "gen_ai.request.temperature", "gen_ai.request.top_p",
+                    "gen_ai.request.frequency_penalty", "gen_ai.request.presence_penalty"
+                ]:
+                    other_attrs[key.replace("gen_ai.request.", "")] = value
+            if other_attrs:
+                request["other"] = other_attrs
+            
+            # Extract messages from logs (GenAI semantic conventions use logs for message content)
+            messages = []
+            completion_text = None
+            
+            if logs:
+                for log_data in logs:
+                    log_record = log_data.log_record
+                    if not log_record or not log_record.body:
+                        continue
+                    
+                    body = log_record.body
+                    
+                    # Parse body - can be dict or JSON string
+                    if isinstance(body, str):
+                        try:
+                            import json
+                            body_data = json.loads(body)
+                        except json.JSONDecodeError:
+                            continue
+                    elif isinstance(body, dict):
+                        body_data = body
+                    else:
+                        continue
+                    
+                    # Get event name to determine message type
+                    # Format: gen_ai.{role}.message or gen_ai.choice
+                    event_name = getattr(log_record, 'event_name', '') or ''
+                    
+                    # Completion/choice logs - handle both OpenAI and Gemini formats
+                    if event_name == "gen_ai.choice":
+                        content = None
+                        
+                        # OpenAI format: message.content
+                        if "message" in body_data:
+                            msg = body_data.get("message", {})
+                            if isinstance(msg, dict):
+                                content = msg.get("content", "")
+                        
+                        # Gemini format: content.parts[].text (nested structure)
+                        elif "content" in body_data:
+                            content_obj = body_data.get("content", {})
+                            if isinstance(content_obj, dict) and "parts" in content_obj:
+                                parts = content_obj.get("parts", [])
+                                text_parts = []
+                                for part in parts:
+                                    if isinstance(part, dict):
+                                        # Try various field names
+                                        text = part.get("text") or part.get("content") or ""
+                                        if text:
+                                            text_parts.append(str(text))
+                                    elif hasattr(part, "text"):
+                                        text_parts.append(str(part.text))
+                                    elif hasattr(part, "content"):
+                                        text_parts.append(str(part.content))
+                                if text_parts:
+                                    content = "".join(text_parts)
+                            elif isinstance(content_obj, str):
+                                content = content_obj
+                        
+                        # Fallback: parts directly in body
+                        elif "parts" in body_data:
+                            parts = body_data.get("parts", [])
+                            text_parts = []
+                            for part in parts:
+                                if isinstance(part, dict):
+                                    text = part.get("text") or part.get("content") or ""
+                                    if text:
+                                        text_parts.append(str(text))
+                                elif hasattr(part, "text"):
+                                    text_parts.append(str(part.text))
+                                elif hasattr(part, "content"):
+                                    text_parts.append(str(part.content))
+                            if text_parts:
+                                content = "".join(text_parts)
+                        
+                        if content and not completion_text:
+                            completion_text = str(content)
+                    
+                    # Prompt logs: gen_ai.{role}.message format (Gemini uses this)
+                    elif event_name.startswith("gen_ai.") and event_name.endswith(".message"):
+                        # Extract role from event name (e.g., "gen_ai.system.message" -> "system")
+                        role = event_name.replace("gen_ai.", "").replace(".message", "")
+                        content = None
+                        
+                        # Direct content field
+                        if "content" in body_data:
+                            content = body_data.get("content", "")
+                        
+                        # Gemini format: parts[].content
+                        elif "parts" in body_data:
+                            parts = body_data.get("parts", [])
+                            text_parts = []
+                            for part in parts:
+                                if isinstance(part, dict) and "content" in part:
+                                    text_parts.append(str(part["content"]))
+                                elif isinstance(part, dict) and "text" in part:
+                                    text_parts.append(str(part["text"]))
+                                elif hasattr(part, "content"):
+                                    text_parts.append(str(part.content))
+                            if text_parts:
+                                content = "".join(text_parts)
+                        
+                        if content:
+                            messages.append({"role": str(role), "content": str(content)})
+                    
+                    # Fallback: prompt logs with 'content' directly (OpenAI format)
+                    elif "content" in body_data and "index" not in body_data:
+                        role = body_data.get("role", "user")
+                        content = body_data.get("content", "")
+                        if content:
+                            messages.append({"role": str(role), "content": str(content)})
+            
+            # Fallback: try span events if no logs provided message data
+            if not messages:
+                for event in span.events or []:
+                    event_attrs = dict(event.attributes) if event.attributes else {}
+                    
+                    if event.name == "gen_ai.content.prompt":
+                        role = event_attrs.get("gen_ai.prompt.role", "user")
+                        content = event_attrs.get("gen_ai.prompt.content") or event_attrs.get("gen_ai.prompt", "")
+                        if content:
+                            messages.append({"role": str(role), "content": str(content)})
+                    elif event.name.startswith("gen_ai.") and "prompt" in event.name.lower():
+                        content = event_attrs.get("content") or event_attrs.get("gen_ai.prompt", "")
+                        role = event_attrs.get("role", "user")
+                        if content:
+                            messages.append({"role": str(role), "content": str(content)})
+            
+            if not completion_text:
+                for event in span.events or []:
+                    event_attrs = dict(event.attributes) if event.attributes else {}
+                    
+                    if event.name == "gen_ai.content.completion":
+                        completion_text = event_attrs.get("gen_ai.completion.content") or event_attrs.get("gen_ai.completion", "")
+                        break
+                    elif event.name.startswith("gen_ai.") and "completion" in event.name.lower():
+                        completion_text = event_attrs.get("content") or event_attrs.get("gen_ai.completion", "")
+                        break
+            
+            if messages:
+                request["messages"] = messages
+            
+            # Build response object
+            response: Dict[str, Any] = {}
+            
+            # Response ID
+            response_id = attrs.get("gen_ai.response.id")
+            if response_id:
+                response["id"] = response_id
+            
+            # Response model
+            response_model = attrs.get("gen_ai.response.model", request_model)
+            if response_model:
+                response["model"] = response_model
+            
+            if completion_text:
+                response["text"] = str(completion_text)
+            
+            # Finish reasons
+            finish_reasons = attrs.get("gen_ai.response.finish_reasons")
+            if finish_reasons:
+                if isinstance(finish_reasons, (list, tuple)):
+                    response["finish_reason"] = finish_reasons[0] if len(finish_reasons) == 1 else list(finish_reasons)
+                else:
+                    response["finish_reason"] = str(finish_reasons)
+            
+            # Extract usage metrics
+            usage: Dict[str, Any] = {}
+            input_tokens = attrs.get("gen_ai.usage.input_tokens") or attrs.get("gen_ai.usage.prompt_tokens")
+            output_tokens = attrs.get("gen_ai.usage.output_tokens") or attrs.get("gen_ai.usage.completion_tokens")
+            total_tokens = attrs.get("gen_ai.usage.total_tokens")
+            
+            if input_tokens is not None:
+                usage["prompt_tokens"] = int(input_tokens)
+            if output_tokens is not None:
+                usage["completion_tokens"] = int(output_tokens)
+            if total_tokens is not None:
+                usage["total_tokens"] = int(total_tokens)
+            elif input_tokens is not None and output_tokens is not None:
+                usage["total_tokens"] = int(input_tokens) + int(output_tokens)
+            
+            # Add detailed token info if available
+            prompt_tokens_details = {}
+            completion_tokens_details = {}
+            for key, value in attrs.items():
+                if "prompt_tokens" in key and key != "gen_ai.usage.prompt_tokens":
+                    detail_key = key.split(".")[-1]
+                    prompt_tokens_details[detail_key] = value
+                elif "completion_tokens" in key and key != "gen_ai.usage.completion_tokens":
+                    detail_key = key.split(".")[-1]
+                    completion_tokens_details[detail_key] = value
+            
+            if prompt_tokens_details:
+                usage["prompt_tokens_details"] = prompt_tokens_details
+            if completion_tokens_details:
+                usage["completion_tokens_details"] = completion_tokens_details
+                
+            if usage:
+                response["usage"] = usage
+            
+            # Check for errors
+            error = None
+            if span.status and span.status.status_code:
+                from opentelemetry.trace import StatusCode
+                if span.status.status_code == StatusCode.ERROR:
+                    error = span.status.description or "Unknown error"
+            
+            # Also check for error attributes
+            if not error:
+                error_type = attrs.get("error.type")
+                if error_type:
+                    error_msg = attrs.get("error.message", "")
+                    error = f"{error_type}: {error_msg}" if error_msg else str(error_type)
+            
+            return ObsEvent(
+                provider=provider,
+                api=api_name,
+                request=request if request.get("model") or request.get("messages") else None,
+                response=response if response else None,
+                error=error,
+                started_at=started_at,
+                ended_at=ended_at,
+                duration_ms=round(duration_ms, 3),
+                span_id=span_id,
+                parent_span_id=parent_span_id,
+                trace_id=trace_id,
+            )
+        except Exception as e:
+            logger.debug(f"Failed to convert OTel span to event: {e}")
+            return None
 
     def _validate_api_key(self) -> None:
         """Validate the API key with shepherd server.
@@ -677,13 +1079,27 @@ class Collector:
                     )
             self._events[sid].append(ev)
 
-    # Span context management for nested tracing
+    # Span context management for nested tracing (OTel-based)
     def get_current_span_id(self) -> Optional[str]:
-        """Get the current span ID from context (for parent-child linking)."""
+        """Get the current span ID from OTel context (for parent-child linking)."""
+        try:
+            from opentelemetry import trace
+            span = trace.get_current_span()
+            if span and span.is_recording():
+                span_ctx = span.get_span_context()
+                if span_ctx and span_ctx.is_valid:
+                    return format(span_ctx.span_id, '016x')
+        except Exception:
+            pass
+        # Fallback to legacy context var
         return _current_span_id.get()
 
     def set_current_span_id(self, span_id: Optional[str]) -> contextvars.Token[Optional[str]]:
-        """Set the current span ID in context. Returns a token to restore previous value."""
+        """Set the current span ID in context. Returns a token to restore previous value.
+        
+        Note: This is primarily for backward compatibility. OTel context is managed
+        automatically when using tracer.start_as_current_span().
+        """
         return _current_span_id.set(span_id)
 
     def reset_span_id(self, token: contextvars.Token[Optional[str]]) -> None:

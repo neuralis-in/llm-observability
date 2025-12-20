@@ -1,8 +1,15 @@
 # Core dependencies
 pydantic>=2
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
 
 # OpenAI provider support (optional)
 openai>=1.0.0,<2
+opentelemetry-instrumentation-openai-v2>=2.0b0
+
+# Gemini provider support (optional)
+google-genai>=1.0.0
+opentelemetry-instrumentation-google-genai>=0.4b0
 
 # Example dependencies (optional)
 python-dotenv>=1.0
