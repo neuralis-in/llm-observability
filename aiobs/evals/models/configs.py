@@ -340,3 +340,47 @@ class JailbreakDetectionConfig(BaseEvalConfig):
         ge=1,
         description="Maximum number of violations to extract and report"
     )
+
+
+class ComputeMode(str, Enum):
+    """Computation evaluation modes."""
+    
+    NUMERIC = "numeric"
+    EXACT = "exact"
+    EXPRESSION = "expression"
+    CODE_OUTPUT = "code_output"
+
+
+class ComputeCorrectnessConfig(BaseEvalConfig):
+    """Configuration for compute correctness evaluator.
+    
+    Evaluates mathematical and computational correctness of outputs.
+    """
+    
+    mode: ComputeMode = Field(
+        default=ComputeMode.NUMERIC,
+        description="Evaluation mode: numeric, exact, expression, or code_output"
+    )
+    tolerance: float = Field(
+        default=1e-6,
+        ge=0.0,
+        description="Tolerance for numeric comparisons"
+    )
+    relative_tolerance: bool = Field(
+        default=False,
+        description="If True, tolerance is relative to expected value"
+    )
+    extract_from_text: bool = Field(
+        default=True,
+        description="Try to extract numeric/code values from surrounding text"
+    )
+    timeout_seconds: float = Field(
+        default=5.0,
+        ge=0.1,
+        le=60.0,
+        description="Timeout for code execution (code_output mode only)"
+    )
+    allowed_modules: List[str] = Field(
+        default_factory=list,
+        description="List of allowed Python modules for code execution"
+    )

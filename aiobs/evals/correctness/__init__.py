@@ -7,6 +7,7 @@ from .schema_assertion import SchemaAssertion
 from .ground_truth import GroundTruthEval
 from .hallucination_detection import HallucinationDetectionEval
 from .sql_query_validator import SQLQueryValidator
+from .math_code_correctness import ComputeCorrectnessEval
 
 __all__ = [
     "RegexAssertion",
@@ -14,5 +15,6 @@ __all__ = [
     "GroundTruthEval",
     "HallucinationDetectionEval",
     "SQLQueryValidator",
+    "ComputeCorrectnessEval",
 ]
 

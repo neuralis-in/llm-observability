@@ -23,6 +23,8 @@ from aiobs.evals import (
     SQLQueryValidatorConfig,
     JailbreakDetectionConfig,
     ToxicityDetectionConfig,
+    ComputeCorrectnessConfig,
+    ComputeMode,
     # Evaluators
     RegexAssertion,
     SchemaAssertion,
@@ -33,6 +35,7 @@ from aiobs.evals import (
     SQLQueryValidator,
     JailbreakDetectionEval,
     ToxicityDetectionEval,
+    ComputeCorrectnessEval
 )
 from aiobs.llm import LLM, BaseLLM, LLMResponse
 
@@ -2342,3 +2345,300 @@ class TestJailbreakDetectionEval:
         assert result.status == EvalStatus.ERROR
         assert "API Error" in str(result.message)
 
+
+# =============================================================================
+# ComputeCorrectnessEval Tests
+# =============================================================================
+
+
+class TestComputeCorrectnessEval:
+    """Tests for ComputeCorrectnessEval."""
+
+    def test_numeric_comparison(self):
+        """Test numeric comparisons with tolerance."""
+        # Exact match
+        evaluator = ComputeCorrectnessEval.numeric(tolerance=1e-6)
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="What is 2+2?",
+                model_output="4",
+                expected_output="4",
+            )
+        )
+        assert result.status == EvalStatus.PASSED
+        assert result.score == 1.0
+
+        # Within tolerance
+        evaluator = ComputeCorrectnessEval.numeric(tolerance=0.01)
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="What is sqrt(2)?",
+                model_output="1.414",
+                expected_output="1.41421356",
+            )
+        )
+        assert result.status == EvalStatus.PASSED
+        assert result.details["difference"] < 0.01
+
+    def test_numeric_outside_tolerance(self):
+        """Test numeric match outside tolerance."""
+        evaluator = ComputeCorrectnessEval.numeric(tolerance=0.001)
+
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="What is pi?",
+                model_output="3.14",
+                expected_output="3.14159",
+            )
+        )
+
+        assert result.status == EvalStatus.FAILED
+        assert result.score < 1.0
+
+    def test_numeric_relative_tolerance(self):
+        """Test numeric match with relative tolerance."""
+        evaluator = ComputeCorrectnessEval.numeric(
+            tolerance=0.01,  # 1% relative tolerance
+            relative_tolerance=True,
+        )
+
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Large number",
+                model_output="100.5",
+                expected_output="100",
+            )
+        )
+
+        assert result.status == EvalStatus.PASSED  # 0.5 is < 1% of 100
+
+    def test_numeric_parsing_variations(self):
+        """Test extracting numbers from text and scientific notation."""
+        evaluator = ComputeCorrectnessEval.numeric(tolerance=0.01)
+
+        # Extract from text
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="What is 2+2?",
+                model_output="The answer to 2+2 is 4.",
+                expected_output="4",
+            )
+        )
+        assert result.status == EvalStatus.PASSED
+        assert result.details["output"] == 4.0
+
+        # Scientific notation
+        evaluator = ComputeCorrectnessEval.numeric(tolerance=1e-6)
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Scientific notation",
+                model_output="1.23e-4",
+                expected_output="0.000123",
+            )
+        )
+        assert result.status == EvalStatus.PASSED
+
+    def test_numeric_special_values(self):
+        """Test NaN and infinity handling."""
+        evaluator = ComputeCorrectnessEval.numeric()
+
+        # NaN
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="NaN test",
+                model_output="nan",
+                expected_output="nan",
+            )
+        )
+        assert result.status == EvalStatus.PASSED
+
+        # Infinity
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Infinity test",
+                model_output="inf",
+                expected_output="inf",
+            )
+        )
+        assert result.status == EvalStatus.PASSED
+
+    def test_numeric_invalid_conversion(self):
+        """Test invalid numeric conversion."""
+        evaluator = ComputeCorrectnessEval.numeric()
+
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Invalid number",
+                model_output="not a number",
+                expected_output="5",
+            )
+        )
+
+        assert result.status == EvalStatus.FAILED
+        assert "Failed to convert" in result.details["message"]
+
+    def test_exact_comparison(self):
+        """Test exact string comparison."""
+        evaluator = ComputeCorrectnessEval.exact()
+
+        # Match
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="String comparison",
+                model_output="hello",
+                expected_output="hello",
+            )
+        )
+        assert result.status == EvalStatus.PASSED
+        assert result.score == 1.0
+
+        # Mismatch (case sensitive)
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="String comparison",
+                model_output="hello",
+                expected_output="Hello",
+            )
+        )
+        assert result.status == EvalStatus.FAILED
+        assert result.score == 0.0
+
+    def test_expression_evaluation(self):
+        """Test expression evaluation with math functions."""
+        # Simple arithmetic
+        evaluator = ComputeCorrectnessEval.expression()
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Calculate 2 + 2 * 3",
+                model_output="8",
+                expected_output="2 + 2 * 3",
+            )
+        )
+        assert result.status == EvalStatus.PASSED
+
+        # Math functions (sqrt, pi)
+        evaluator = ComputeCorrectnessEval.expression(tolerance=0.01)
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Square root",
+                model_output="1.414",
+                expected_output="sqrt(2)",
+            )
+        )
+        assert result.status == EvalStatus.PASSED
+
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Pi value",
+                model_output="3.14159",
+                expected_output="pi",
+            )
+        )
+        assert result.status == EvalStatus.PASSED
+
+    def test_expression_error_handling(self):
+        """Test expression with invalid syntax and unsafe operations."""
+        # Invalid syntax
+        config = ComputeCorrectnessConfig(
+            mode=ComputeMode.EXPRESSION,
+            extract_from_text=False,  # Don't extract, force expression parsing
+        )
+        evaluator = ComputeCorrectnessEval(config)
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Invalid expression",
+                model_output="2 +",
+                expected_output="5",
+            )
+        )
+        assert result.status == EvalStatus.FAILED
+        assert (
+            "expression" in result.details["message"].lower()
+            or "syntax" in result.details["message"].lower()
+        )
+
+        # Unsafe operations
+        evaluator = ComputeCorrectnessEval.expression()
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Unsafe code",
+                model_output="__import__('os').system('ls')",
+                expected_output="5",
+            )
+        )
+        assert result.status == EvalStatus.FAILED
+        assert (
+            "unsafe" in result.details["message"].lower()
+            or "expression" in result.details["message"].lower()
+        )
+
+    def test_code_output_mode_not_implemented(self):
+        """Test code output mode returns not implemented."""
+        evaluator = ComputeCorrectnessEval.code_output()
+
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Code test",
+                model_output="print('hello')",
+                expected_output="hello",
+            )
+        )
+
+        assert result.status == EvalStatus.FAILED
+        assert "not implemented" in result.details["message"].lower()
+
+    def test_config_creation(self):
+        """Test config model creation."""
+        config = ComputeCorrectnessConfig(
+            mode=ComputeMode.NUMERIC,
+            tolerance=0.001,
+            relative_tolerance=True,
+            extract_from_text=False,
+        )
+
+        assert config.mode == ComputeMode.NUMERIC
+        assert config.tolerance == 0.001
+        assert config.relative_tolerance is True
+        assert config.extract_from_text is False
+
+    def test_expected_output_handling(self):
+        """Test expected output error and kwargs override."""
+        evaluator = ComputeCorrectnessEval.numeric()
+
+        # Error when no expected output
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Test",
+                model_output="5",
+            )
+        )
+        assert result.status == EvalStatus.ERROR
+        assert "expected_output" in result.message.lower()
+
+        # Providing expected via kwargs
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Test",
+                model_output="5",
+            ),
+            expected="5",
+        )
+        assert result.status == EvalStatus.PASSED
+
+    def test_custom_name_via_config(self):
+        """Test custom evaluator name via config."""
+        config = ComputeCorrectnessConfig(
+            name="my_custom_compute_eval",
+            mode=ComputeMode.EXACT,
+        )
+        evaluator = ComputeCorrectnessEval(config)
+
+        result = evaluator.evaluate(
+            EvalInput(
+                user_input="Test",
+                model_output="5",
+                expected_output="5",
+            )
+        )
+
+        assert result.eval_name == "my_custom_compute_eval"
