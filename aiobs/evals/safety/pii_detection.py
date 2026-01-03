@@ -72,7 +72,9 @@ class PIIDetectionEval(BaseEval):
     # Default PII patterns
     DEFAULT_PATTERNS: Dict[PIIType, str] = {
         PIIType.EMAIL: r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
-        PIIType.PHONE: r"\b(?:\+?1[-.\s]?)?(?:\(?[0-9]{3}\)?[-.\s]?)?[0-9]{3}[-.\s]?[0-9]{4}\b",
+        # Phone pattern: country code 1 must have separator after it (1-XXX, 1 XXX, +1XXX)
+        # to avoid matching year ranges like 1945-1946 as phone numbers
+        PIIType.PHONE: r"\b(?:\+1[-.\s]?|1[-.\s])?(?:\(?[0-9]{3}\)?[-.\s]?)?[0-9]{3}[-.\s]?[0-9]{4}\b",
         PIIType.SSN: r"\b(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}\b",
         PIIType.CREDIT_CARD: r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b",
         PIIType.IP_ADDRESS: r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b",
