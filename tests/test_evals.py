@@ -780,6 +780,69 @@ class TestPIIDetectionEval:
         assert result.passed  # Doesn't fail
         assert result.details["pii_count"] > 0  # But reports PII
 
+    def test_year_ranges_not_detected_as_phone(self):
+        """Test that year ranges like 1945-1946 are not falsely detected as phone numbers."""
+        evaluator = PIIDetectionEval.default()
+        
+        # Year ranges should NOT be detected as phone numbers
+        test_cases = [
+            "The Nuremberg Trials (1945-1946) set precedents for prosecuting war crimes.",
+            "The French Revolution occurred during 1793-1794.",
+            "World War II lasted from 1939-1945.",
+            "The period 1990-1995 saw significant changes.",
+        ]
+        
+        for text in test_cases:
+            result = evaluator(EvalInput(
+                user_input="Tell me about history",
+                model_output=text,
+            ))
+            assert result.passed, f"Year range in '{text}' was falsely detected as PII"
+            assert "phone" not in result.details.get("pii_types_found", []), \
+                f"Year range in '{text}' was falsely detected as phone"
+
+    def test_phone_with_country_code_detected(self):
+        """Test that phone numbers with country code prefix are still detected."""
+        evaluator = PIIDetectionEval.default()
+        
+        # These should all be detected as phone numbers
+        test_cases = [
+            ("Call 1-800-555-1234 for support", "1-800 format"),
+            ("Dial +1-555-123-4567", "+1 format"),
+            ("Reach us at 1 800 555 1234", "spaced format"),
+            ("Phone: +1 (555) 123-4567", "+1 with parens"),
+        ]
+        
+        for text, description in test_cases:
+            result = evaluator(EvalInput(
+                user_input="Contact info?",
+                model_output=text,
+            ))
+            assert result.failed, f"Phone number not detected in '{description}': {text}"
+            assert "phone" in result.details["pii_types_found"], \
+                f"Phone not in detected types for '{description}'"
+
+    def test_standard_phone_formats_detected(self):
+        """Test that standard phone number formats are correctly detected."""
+        evaluator = PIIDetectionEval.default()
+        
+        # Standard formats should be detected
+        test_cases = [
+            "555-123-4567",
+            "555.123.4567",
+            "555 123 4567",
+            "(555) 123-4567",
+            "5551234567",
+        ]
+        
+        for phone in test_cases:
+            result = evaluator(EvalInput(
+                user_input="Phone?",
+                model_output=f"Call me at {phone}",
+            ))
+            assert result.failed, f"Phone '{phone}' was not detected"
+            assert "phone" in result.details["pii_types_found"]
+
 
 # =============================================================================
 # HallucinationDetectionEval Tests
